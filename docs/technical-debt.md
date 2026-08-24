@@ -126,14 +126,14 @@ using it to infer permission state.
 
 ## Test-structure cleanup
 
-Several opt-in XCTest cases are measurement experiments rather than regression tests:
+Several opt-in device diagnostics are measurement experiments rather than regression tests:
 
 - startup timing tests mostly print timings without acceptance assertions;
 - the voice-processing layout test prints per-channel measurements but proves only that
   channel zero is non-silent, and its real-time tap takes an `NSLock`, which can perturb the
   callback behavior it is supposed to measure;
 - the ducking test exhaustively plays all hardware-dependent configurations;
-- `testVoiceProcessingSuppressesTheSpeakers` compares peak amplitude with and without
+- `voiceProcessingSuppressesTheSpeakers` compares peak amplitude with and without
   cancellation, and peak across a four-second recording is not a measure of cancellation.
   The canceller converges over the first seconds of a session, so the peak reports where
   the loud syllables happened to fall: the same configuration measured 0.0057, 0.0064,

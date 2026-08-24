@@ -3,15 +3,9 @@ import Foundation
 import Testing
 import TranscriberCore
 
-/// The first suite written against Swift Testing rather than XCTest.
-///
-/// The reason is the header table below. Under XCTest the fixed fields of a WAV header were
-/// a dozen assertions inside one test, so a wrong byte rate reported as "testHeader failed"
-/// and the field had to be found by reading the source. As arguments to a parameterized
-/// test each field is its own case, named in the report.
-///
-/// New tests are written this way; the XCTest suites stay as they are until some other
-/// change brings them into a diff. Both frameworks run side by side in this target.
+/// The header table below gives every fixed WAV field its own parameterized case. A wrong
+/// byte rate therefore names that field in the report instead of failing one test that
+/// contains a dozen unrelated assertions.
 @Suite("WAV writer")
 final class WAVWriterTests {
     private let directory: URL
