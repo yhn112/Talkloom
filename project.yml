@@ -41,9 +41,15 @@ settings:
 packages:
   # Lock-free cursors for the capture ring buffer. Swift's own `Synchronization.Atomic`
   # would do, but it is macOS 15+, and the deployment floor here is 14.2.
+  #
+  # Pinned exactly rather than `from:`. Package.resolved lives inside the generated
+  # .xcodeproj, which is not in git, so nothing else in the repository records which
+  # version was built. With a range, a clean checkout could silently resolve to a
+  # different one, and the first place that would show up is a ring buffer that stopped
+  # being lock-free. Raising it is a deliberate edit here.
   Atomics:
     url: https://github.com/apple/swift-atomics
-    from: "1.3.1"
+    exactVersion: "1.3.1"
 
 targets:
   Transcriber:
