@@ -18,7 +18,13 @@
       "Bash(codesign --display:*)",
       "Bash(codesign --verify:*)",
       "Bash(scripts/audio_check.py:*)",
-      "Bash(scripts/wer.py:*)"
+      "Bash(scripts/wer.py:*)",
+      "Bash(scripts/check.sh:*)",
+      "Bash(scripts/format.sh:*)",
+      "Bash(python3 scripts/check_docs.py:*)",
+      "Bash(swift test:*)",
+      "Bash(xcsift:*)",
+      "Bash(scripts/track_compare.py:*)"
     ],
     "deny": []
   }
