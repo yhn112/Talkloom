@@ -90,7 +90,8 @@ final class TrackInput: @unchecked Sendable {
 
         let channelCount = Int(buffer.format.channelCount)
         if buffer.format.isInterleaved {
-            return write(interleaved: channels[0], frameCount: frameCount, channelCount: channelCount)
+            return write(
+                interleaved: channels[0], frameCount: frameCount, channelCount: channelCount)
         }
         return write(deinterleaved: channels, frameCount: frameCount, channelCount: channelCount)
     }
@@ -107,11 +108,13 @@ final class TrackInput: @unchecked Sendable {
     /// a misconfigured device into missing samples, which is counted and visible.
     @discardableResult
     func write(_ bufferList: UnsafePointer<AudioBufferList>) -> Bool {
-        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            UnsafeMutablePointer(mutating: bufferList))
         guard let first = buffers.first else { return true }
 
         lastListShape.store(
-            UInt64(buffers.count) << 48 | UInt64(first.mNumberChannels) << 32 | UInt64(first.mDataByteSize),
+            UInt64(buffers.count) << 48 | UInt64(first.mNumberChannels) << 32
+                | UInt64(first.mDataByteSize),
             ordering: .relaxed
         )
 

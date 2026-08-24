@@ -115,7 +115,8 @@ final class AudioRingBuffer: @unchecked Sendable {
         let firstChunk = min(available, capacity - offset)
         destination.update(from: storage.advanced(by: offset), count: firstChunk)
         if firstChunk < available {
-            destination.advanced(by: firstChunk).update(from: storage, count: available - firstChunk)
+            destination.advanced(by: firstChunk).update(
+                from: storage, count: available - firstChunk)
         }
 
         readCursor.store(readIndex + available, ordering: .releasing)

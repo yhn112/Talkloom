@@ -25,7 +25,9 @@ final class RecordingControllerDeviceTests: XCTestCase {
         let controller = RecordingController(sessionRoot: root)
 
         await controller.start()
-        let session = try XCTUnwrap(controller.currentSession, "recording did not start: \(controller.errorMessage ?? "no error reported")")
+        let session = try XCTUnwrap(
+            controller.currentSession,
+            "recording did not start: \(controller.errorMessage ?? "no error reported")")
         XCTAssertTrue(controller.isRecording)
 
         let speech = Process()
@@ -49,12 +51,17 @@ final class RecordingControllerDeviceTests: XCTestCase {
         // The two tracks are never one file, and both actually reached disk.
         XCTAssertTrue(FileManager.default.fileExists(atPath: session.microphoneTrackURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: session.systemTrackURL.path))
-        XCTAssertEqual(try AVAudioFile(forReading: session.microphoneTrackURL).length, AVAudioFramePosition(microphone.frameCount))
-        XCTAssertEqual(try AVAudioFile(forReading: session.systemTrackURL).length, AVAudioFramePosition(system.frameCount))
+        XCTAssertEqual(
+            try AVAudioFile(forReading: session.microphoneTrackURL).length,
+            AVAudioFramePosition(microphone.frameCount))
+        XCTAssertEqual(
+            try AVAudioFile(forReading: session.systemTrackURL).length,
+            AVAudioFramePosition(system.frameCount))
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
 
         XCTAssertEqual(Set(manifest.tracks.map(\.file)), ["mic.wav", "system.wav"])

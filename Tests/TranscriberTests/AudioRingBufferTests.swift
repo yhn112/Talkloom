@@ -12,7 +12,9 @@ final class AudioRingBufferTests: XCTestCase {
 
     private func readAll(_ buffer: AudioRingBuffer, count: Int) -> [Float] {
         var out = [Float](repeating: .nan, count: count)
-        let read = out.withUnsafeMutableBufferPointer { buffer.read(into: $0.baseAddress!, count: count) }
+        let read = out.withUnsafeMutableBufferPointer {
+            buffer.read(into: $0.baseAddress!, count: count)
+        }
         return Array(out.prefix(read))
     }
 
@@ -57,7 +59,8 @@ final class AudioRingBufferTests: XCTestCase {
         for round in 0..<50 {
             let count = 1 + round % 7
             XCTAssertTrue(writeRamp(buffer, from: expected, count: count))
-            XCTAssertEqual(readAll(buffer, count: count), (expected..<(expected + count)).map(Float.init))
+            XCTAssertEqual(
+                readAll(buffer, count: count), (expected..<(expected + count)).map(Float.init))
             expected += count
         }
         XCTAssertEqual(buffer.droppedSampleCount, 0)
@@ -121,7 +124,9 @@ final class AudioRingBufferTests: XCTestCase {
                 let block = (0..<blockSize).map { Float(sample + $0) }
                 // The producer is the real-time side and may not wait, but the test must
                 // not lose samples, so it retries instead of dropping.
-                while !block.withUnsafeBufferPointer({ buffer.write($0.baseAddress!, count: blockSize) }) {
+                while !block.withUnsafeBufferPointer({
+                    buffer.write($0.baseAddress!, count: blockSize)
+                }) {
                     Thread.sleep(forTimeInterval: 0.0005)
                 }
                 sample += blockSize

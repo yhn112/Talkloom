@@ -127,7 +127,8 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         tracks = try container.decode([Track].self, forKey: .tracks)
         failure = try container.decodeIfPresent(String.self, forKey: .failure)
         warning = try container.decodeIfPresent(String.self, forKey: .warning)
-        status = try container.decodeIfPresent(Status.self, forKey: .status)
+        status =
+            try container.decodeIfPresent(Status.self, forKey: .status)
             ?? (failure == nil ? .completed : .failed)
     }
 
@@ -135,6 +136,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(self).write(to: directory.appending(path: Self.fileName), options: .atomic)
+        try encoder.encode(self).write(
+            to: directory.appending(path: Self.fileName), options: .atomic)
     }
 }

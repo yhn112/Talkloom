@@ -64,7 +64,8 @@ actor MicrophoneCapture {
     func start(
         writingTo url: URL,
         voiceProcessing: Bool = true,
-        ducking: AVAudioVoiceProcessingOtherAudioDuckingConfiguration = MicrophoneCapture.transparentDucking
+        ducking: AVAudioVoiceProcessingOtherAudioDuckingConfiguration = MicrophoneCapture
+            .transparentDucking
     ) async throws -> AVAudioFormat {
         guard recorder == nil else { return engine.inputNode.outputFormat(forBus: 0) }
         let input = engine.inputNode
@@ -90,7 +91,8 @@ actor MicrophoneCapture {
         // silence without reporting an error.
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw Failure.unusableInputFormat(sampleRate: format.sampleRate, channelCount: format.channelCount)
+            throw Failure.unusableInputFormat(
+                sampleRate: format.sampleRate, channelCount: format.channelCount)
         }
 
         // The graph differs between the two modes, and both shapes were arrived at by
@@ -183,7 +185,8 @@ actor MicrophoneCapture {
             "microphone track: \(summary.duration, format: .fixed(precision: 1), privacy: .public) s, peak \(summary.peakAmplitude, format: .fixed(precision: 4), privacy: .public), dropped \(summary.droppedSampleCount, privacy: .public) samples"
         )
         if summary.isSilent {
-            AppLog.capture.error("microphone track is silent; check the input device and the microphone permission")
+            AppLog.capture.error(
+                "microphone track is silent; check the input device and the microphone permission")
         }
         if summary.isClipped {
             AppLog.capture.error(

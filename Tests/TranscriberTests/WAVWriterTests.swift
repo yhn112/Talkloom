@@ -101,13 +101,16 @@ final class WAVWriterTests: XCTestCase {
         XCTAssertEqual(audioFile.fileFormat.channelCount, 1)
         XCTAssertEqual(audioFile.length, AVAudioFramePosition(samples.count))
 
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))!
         try audioFile.read(into: buffer)
         XCTAssertEqual(buffer.frameLength, AVAudioFrameCount(samples.count))
 
         let decoded = buffer.floatChannelData![0]
         let peak = (0..<Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(decoded[$1])) }
-        XCTAssertEqual(peak, 16_000 / 32_768, accuracy: 0.001, "peak amplitude survives the round trip")
+        XCTAssertEqual(
+            peak, 16_000 / 32_768, accuracy: 0.001, "peak amplitude survives the round trip")
     }
 }

@@ -72,14 +72,17 @@ final class DuckingMeasurementTests: XCTestCase {
     /// ramp reports whatever fraction of the un-ducked opening happened to land in the
     /// window — which is how the same configuration came back at 0.44 and at 0.199 on
     /// consecutive runs. Peak answers "is this silent"; it does not answer "how loud".
-    private func settledLevel(of url: URL, skipping lead: Double = 1.5, over span: Double = 1.0) throws -> Double {
+    private func settledLevel(of url: URL, skipping lead: Double = 1.5, over span: Double = 1.0)
+        throws -> Double
+    {
         let file = try AVAudioFile(forReading: url)
         let rate = file.fileFormat.sampleRate
         let start = AVAudioFramePosition(lead * rate)
         let count = AVAudioFrameCount(min(span * rate, Double(file.length) - Double(start)))
         guard start < file.length, count > 0 else { return -.infinity }
 
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count)!
         file.framePosition = start
         try file.read(into: buffer, frameCount: count)
@@ -102,7 +105,8 @@ final class DuckingMeasurementTests: XCTestCase {
         check.standardOutput = pipe
         try check.run()
         check.waitUntilExit()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let output = String(
+            decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         XCTAssertTrue(
             output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             "a previous test left audio playing; every level below would be measured against it"
@@ -113,7 +117,9 @@ final class DuckingMeasurementTests: XCTestCase {
     func testTheLeastDuckedConfigurationIsTheOneInUse() async throws {
         let tone = try makeTone()
 
-        func measure(_ ducking: AVAudioVoiceProcessingOtherAudioDuckingConfiguration?) async throws -> Double {
+        func measure(_ ducking: AVAudioVoiceProcessingOtherAudioDuckingConfiguration?) async throws
+            -> Double
+        {
             try assertNothingIsPlaying()
             let microphone = MicrophoneCapture()
             let systemAudio = SystemAudioCapture()
@@ -145,10 +151,13 @@ final class DuckingMeasurementTests: XCTestCase {
         var measured: [(name: String, level: Double)] = []
         for advanced in [false, true] {
             for (name, level) in levels {
-                let dBFS = try await measure(.init(enableAdvancedDucking: ObjCBool(advanced), duckingLevel: level))
+                let dBFS = try await measure(
+                    .init(enableAdvancedDucking: ObjCBool(advanced), duckingLevel: level))
                 let label = "advanced=\(advanced) level=\(name)"
                 measured.append((label, dBFS))
-                print("  \(label): \(String(format: "%.1f", dBFS)) dBFS (\(String(format: "%+.1f", dBFS - reference)) dB)")
+                print(
+                    "  \(label): \(String(format: "%.1f", dBFS)) dBFS (\(String(format: "%+.1f", dBFS - reference)) dB)"
+                )
             }
         }
 

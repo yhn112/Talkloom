@@ -37,8 +37,12 @@ actor SystemAudioCapture {
 
         /// OSStatus values in this API are four-character codes far more often than numbers.
         private static func describe(_ status: OSStatus) -> String {
-            let bytes = [24, 16, 8, 0].map { UInt8((UInt32(bitPattern: status) >> UInt32($0)) & 0xFF) }
-            guard bytes.allSatisfy({ (0x20...0x7E).contains($0) }) else { return "status \(status)" }
+            let bytes = [24, 16, 8, 0].map {
+                UInt8((UInt32(bitPattern: status) >> UInt32($0)) & 0xFF)
+            }
+            guard bytes.allSatisfy({ (0x20...0x7E).contains($0) }) else {
+                return "status \(status)"
+            }
             return "'\(String(decoding: bytes, as: UTF8.self))'"
         }
     }
@@ -54,7 +58,8 @@ actor SystemAudioCapture {
     /// The IO block is dispatched onto this queue. The header is explicit that IO blocks
     /// are dispatched *synchronously*, so this is still a real-time context — the queue
     /// buys nothing that would make allocating or locking acceptable.
-    private let ioQueue = DispatchQueue(label: "me.diskin.Transcriber.system-audio", qos: .userInitiated)
+    private let ioQueue = DispatchQueue(
+        label: "me.diskin.Transcriber.system-audio", qos: .userInitiated)
 
     private var tap: Tap?
     private var recorder: TrackRecorder?
@@ -72,7 +77,8 @@ actor SystemAudioCapture {
     /// leave that behind.
     deinit {
         if let tap {
-            AppLog.capture.error("the system audio tap was dropped without being stopped; tearing it down")
+            AppLog.capture.error(
+                "the system audio tap was dropped without being stopped; tearing it down")
             if let ioProcID = tap.ioProcID {
                 AudioDeviceStop(tap.aggregateID, ioProcID)
                 AudioDeviceDestroyIOProcID(tap.aggregateID, ioProcID)

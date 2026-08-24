@@ -177,7 +177,8 @@ final class RecordingControllerTests: XCTestCase {
         XCTAssertEqual(systemEndCount, 1)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.failure, controller.errorMessage)
     }
@@ -235,7 +236,8 @@ final class RecordingControllerTests: XCTestCase {
         XCTAssertEqual(controller.lastSystemTrack?.frameCount, 24_000)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.failure, controller.errorMessage)
         XCTAssertEqual(manifest.tracks.first?.failure, controller.errorMessage)
@@ -266,7 +268,8 @@ final class RecordingControllerTests: XCTestCase {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.status, .completed)
         XCTAssertEqual(manifest.warning, controller.warning)
@@ -295,7 +298,8 @@ final class RecordingControllerTests: XCTestCase {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertNil(manifest.warning)
         XCTAssertEqual(manifest.tracks.first?.content, .remote)

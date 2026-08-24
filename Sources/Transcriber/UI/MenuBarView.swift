@@ -24,13 +24,15 @@ struct MenuBarView: View {
             if let track = controller.lastMicrophoneTrack {
                 trackRow(
                     track,
-                    silentHint: "The track is silent — check the input device and the microphone permission."
+                    silentHint:
+                        "The track is silent — check the input device and the microphone permission."
                 )
             }
             if let track = controller.lastSystemTrack {
                 trackRow(
                     track,
-                    silentHint: "The track is silent — nothing played, or Audio Recording access is missing."
+                    silentHint:
+                        "The track is silent — nothing played, or Audio Recording access is missing."
                 )
             }
 
@@ -124,9 +126,11 @@ struct MenuBarView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             } else if track.isTooLoud {
-                Text("The input came within a decibel of clipping — consider lowering the input volume.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "The input came within a decibel of clipping — consider lowering the input volume."
+                )
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             if track.droppedSampleCount > 0 {
                 Text("\(track.droppedSampleCount) samples were dropped; the recording has gaps.")

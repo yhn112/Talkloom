@@ -44,7 +44,8 @@ final class PermissionManager {
         // default, which would reduce these lines to "permission is <private>" — useless
         // for the exact diagnosis they exist to support. A permission state is not
         // sensitive data.
-        AppLog.permissions.debug("microphone permission is \(String(describing: self.microphone), privacy: .public)")
+        AppLog.permissions.debug(
+            "microphone permission is \(String(describing: self.microphone), privacy: .public)")
     }
 
     /// Presents the system prompt if the user has not answered it yet.
@@ -52,7 +53,8 @@ final class PermissionManager {
         guard microphone == .notDetermined else { return }
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         microphone = granted ? .granted : .denied
-        AppLog.permissions.notice("microphone permission answered: \(granted ? "granted" : "denied", privacy: .public)")
+        AppLog.permissions.notice(
+            "microphone permission answered: \(granted ? "granted" : "denied", privacy: .public)")
     }
 
     /// Starts a new evidence check. There is no system API that can pre-fill its result.

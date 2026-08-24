@@ -39,7 +39,9 @@ final class SystemAudioCaptureDeviceTests: XCTestCase {
     private func report(_ summary: TrackRecorder.Summary, _ input: TrackInput? = nil) {
         if let input {
             let shape = input.lastBufferListShape
-            print("  [\(summary.label)] last block: \(shape.buffers) buffer(s), \(shape.channels) ch, \(shape.byteCount) bytes")
+            print(
+                "  [\(summary.label)] last block: \(shape.buffers) buffer(s), \(shape.channels) ch, \(shape.byteCount) bytes"
+            )
         }
         print(
             "  [\(summary.label)] rate=\(summary.sampleRate) Hz frames=\(summary.frameCount) "

@@ -14,8 +14,10 @@ final class RecordingSessionTests: XCTestCase {
 
     func testDirectoryNamesSortChronologically() {
         let utc = TimeZone(identifier: "UTC")!
-        let earlier = RecordingSession.directoryName(for: Date(timeIntervalSince1970: 1_000_000), timeZone: utc)
-        let later = RecordingSession.directoryName(for: Date(timeIntervalSince1970: 2_000_000), timeZone: utc)
+        let earlier = RecordingSession.directoryName(
+            for: Date(timeIntervalSince1970: 1_000_000), timeZone: utc)
+        let later = RecordingSession.directoryName(
+            for: Date(timeIntervalSince1970: 2_000_000), timeZone: utc)
 
         XCTAssertLessThan(earlier, later)
     }
@@ -30,7 +32,8 @@ final class RecordingSessionTests: XCTestCase {
 
         var isDirectory: ObjCBool = false
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: session.directory.path, isDirectory: &isDirectory)
+            FileManager.default.fileExists(
+                atPath: session.directory.path, isDirectory: &isDirectory)
         )
         XCTAssertTrue(isDirectory.boolValue)
 
@@ -42,7 +45,8 @@ final class RecordingSessionTests: XCTestCase {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.startedAt, session.startedAt)
         XCTAssertEqual(manifest.status, .recording)

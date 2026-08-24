@@ -126,7 +126,8 @@ actor TrackRecorder {
         // Int16 at the device's rate, not Float32: it is the format every downstream tool
         // reads without argument, and 16 bits is some 90 dB of headroom below anything a
         // meeting recording resolves.
-        self.writer = try suppliedWriter
+        self.writer =
+            try suppliedWriter
             ?? WAVWriter(url: url, sampleRate: Int(sampleRate.rounded()), channelCount: 1)
     }
 

@@ -20,7 +20,9 @@ final class StartupLatencyTests: XCTestCase {
     private func time(_ label: String, _ body: () throws -> Void) rethrows {
         let start = ContinuousClock.now
         try body()
-        print("    \(label): \(String(format: "%.3f", Double((ContinuousClock.now - start).components.attoseconds) / 1e18)) s")
+        print(
+            "    \(label): \(String(format: "%.3f", Double((ContinuousClock.now - start).components.attoseconds) / 1e18)) s"
+        )
     }
 
     func testWhereTheMicrophoneStartupTimeGoes() throws {
@@ -66,7 +68,8 @@ final class StartupLatencyTests: XCTestCase {
             let systemAudio = SystemAudioCapture()
             let directory = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appending(path: "Latency-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: directory) }
 
             let requested = mach_absolute_time()
@@ -112,14 +115,16 @@ final class StartupLatencyTests: XCTestCase {
         var deviceID = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         guard
-            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
                 == noErr
         else { return false }
 
         address.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
         var running: UInt32 = 0
         size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &running) == noErr else { return false }
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &running) == noErr
+        else { return false }
         return running != 0
     }
 
@@ -130,7 +135,8 @@ final class StartupLatencyTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        XCTAssertFalse(inputDeviceIsRunning(), "something was already using the microphone before the test")
+        XCTAssertFalse(
+            inputDeviceIsRunning(), "something was already using the microphone before the test")
 
         _ = try await microphone.start(writingTo: directory.appending(path: "first.wav"))
         try await Task.sleep(for: .milliseconds(500))

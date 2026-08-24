@@ -109,7 +109,9 @@ final class RecordingController {
 
         await permissions.requestMicrophone()
         guard permissions.microphone.isUsable else {
-            fail("Microphone access is required. Grant it in System Settings › Privacy & Security › Microphone.")
+            fail(
+                "Microphone access is required. Grant it in System Settings › Privacy & Security › Microphone."
+            )
             return
         }
 
@@ -239,7 +241,7 @@ final class RecordingController {
                 failure: failure,
                 warning: warning
             )
-                .write(to: session.directory)
+            .write(to: session.directory)
         } catch {
             AppLog.capture.error(
                 "could not write the session manifest: \(error.localizedDescription, privacy: .public)"

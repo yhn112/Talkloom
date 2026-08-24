@@ -56,7 +56,8 @@ final class TrackRecorderTests: XCTestCase {
             channels: 1,
             interleaved: false
         )!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))!
         try file.read(into: buffer)
         let samples = buffer.floatChannelData![0]
         return (0..<Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(samples[$1])) }
@@ -79,7 +80,9 @@ final class TrackRecorderTests: XCTestCase {
         // In blocks, the way a callback delivers them, with the drain loop running between.
         for chunk in stride(from: 0, to: samples.count, by: 1024) {
             let block = Array(samples[chunk..<min(chunk + 1024, samples.count)])
-            block.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: block.count) }
+            block.withUnsafeBufferPointer {
+                _ = recorder.input.ring.write($0.baseAddress!, count: block.count)
+            }
             try await Task.sleep(for: .milliseconds(2))
         }
         let summary = await recorder.finish().summary
@@ -100,11 +103,14 @@ final class TrackRecorderTests: XCTestCase {
 
     func testASilentSourceIsReportedAsSilent() async throws {
         let url = directory.appending(path: "silence.wav")
-        let recorder = try TrackRecorder(label: "system", url: url, sampleRate: 48_000, content: .remote)
+        let recorder = try TrackRecorder(
+            label: "system", url: url, sampleRate: 48_000, content: .remote)
 
         await recorder.start()
         let silence = [Float](repeating: 0, count: 48_000)
-        silence.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: silence.count) }
+        silence.withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: silence.count)
+        }
         let summary = await recorder.finish().summary
 
         XCTAssertTrue(summary.isSilent)
@@ -116,24 +122,30 @@ final class TrackRecorderTests: XCTestCase {
     /// exactly where the recording was loudest.
     func testFullScaleSamplesDoNotWrap() async throws {
         let url = directory.appending(path: "clipping.wav")
-        let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: 16_000, content: .local)
+        let recorder = try TrackRecorder(
+            label: "mic", url: url, sampleRate: 16_000, content: .local)
         let samples: [Float] = [1.0, -1.0, 2.0, -2.0, 0.999_99]
 
         await recorder.start()
-        samples.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: samples.count) }
+        samples.withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: samples.count)
+        }
         let summary = await recorder.finish().summary
 
         XCTAssertEqual(summary.frameCount, samples.count)
         let data = try Data(contentsOf: url).subdata(in: 44..<(44 + samples.count * 2))
         let written = data.withUnsafeBytes { raw in
-            (0..<samples.count).map { Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self)) }
+            (0..<samples.count).map {
+                Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self))
+            }
         }
         XCTAssertEqual(written, [32_767, -32_767, 32_767, -32_767, 32_767])
     }
 
     func testAnUnusableSampleRateIsRejected() {
         let url = directory.appending(path: "bad.wav")
-        XCTAssertThrowsError(try TrackRecorder(label: "mic", url: url, sampleRate: 0, content: .local))
+        XCTAssertThrowsError(
+            try TrackRecorder(label: "mic", url: url, sampleRate: 0, content: .local))
     }
 
     func testAppendFailureIsReturnedWithThePartialSummary() async throws {
@@ -154,7 +166,8 @@ final class TrackRecorderTests: XCTestCase {
         XCTAssertEqual(completion.summary.frameCount, 0)
         XCTAssertEqual(completion.summary.peakAmplitude, 0)
         XCTAssertNotNil(completion.failure)
-        XCTAssertTrue(completion.failure?.localizedDescription.contains("could not write audio") == true)
+        XCTAssertTrue(
+            completion.failure?.localizedDescription.contains("could not write audio") == true)
     }
 
     func testFinalizationFailureIsReturnedWithTheWrittenSummary() async throws {
@@ -181,7 +194,8 @@ final class TrackRecorderTests: XCTestCase {
     /// amplitude must survive, since a halved track is the quiet-remote-party complaint.
     func testInterleavedStereoIsAveragedToMono() throws {
         let input = TrackInput(ringCapacity: 4096)
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: true)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: true)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
         buffer.frameLength = 4
         let interleaved = buffer.floatChannelData![0]
@@ -193,14 +207,17 @@ final class TrackRecorderTests: XCTestCase {
         XCTAssertTrue(input.write(buffer))
 
         var out = [Float](repeating: .nan, count: 4)
-        let read = out.withUnsafeMutableBufferPointer { input.ring.read(into: $0.baseAddress!, count: 4) }
+        let read = out.withUnsafeMutableBufferPointer {
+            input.ring.read(into: $0.baseAddress!, count: 4)
+        }
         XCTAssertEqual(read, 4)
         XCTAssertEqual(out, [0.75, 0.75, 0.75, 0.75])
     }
 
     func testDeinterleavedStereoIsAveragedToMono() throws {
         let input = TrackInput(ringCapacity: 4096)
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
         buffer.frameLength = 4
         for frame in 0..<4 {
@@ -211,14 +228,17 @@ final class TrackRecorderTests: XCTestCase {
         XCTAssertTrue(input.write(buffer))
 
         var out = [Float](repeating: .nan, count: 4)
-        let read = out.withUnsafeMutableBufferPointer { input.ring.read(into: $0.baseAddress!, count: 4) }
+        let read = out.withUnsafeMutableBufferPointer {
+            input.ring.read(into: $0.baseAddress!, count: 4)
+        }
         XCTAssertEqual(read, 4)
         XCTAssertEqual(out, [0.5, 0.5, 0.5, 0.5])
     }
 
     func testMonoGoesStraightThroughUntouched() throws {
         let input = TrackInput(ringCapacity: 4096)
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
         buffer.frameLength = 4
         for frame in 0..<4 { buffer.floatChannelData![0][frame] = Float(frame) / 4 }
@@ -248,14 +268,17 @@ final class TrackRecorderTests: XCTestCase {
         }
 
         var out = [Float](repeating: .nan, count: 4)
-        let read = out.withUnsafeMutableBufferPointer { input.ring.read(into: $0.baseAddress!, count: 4) }
+        let read = out.withUnsafeMutableBufferPointer {
+            input.ring.read(into: $0.baseAddress!, count: 4)
+        }
         XCTAssertEqual(read, 4)
         XCTAssertEqual(out, [0.1, 0.2, 0.3, 0.4])
     }
 
     func testAnOversizedBlockIsDroppedWholeAndCounted() throws {
         let input = TrackInput(ringCapacity: 1 << 16, maximumFrameCount: 8)
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16)!
         buffer.frameLength = 16
 

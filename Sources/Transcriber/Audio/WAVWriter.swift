@@ -39,7 +39,9 @@ final class WAVWriter: PCMWriting {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url])
         }
         let handle = try FileHandle(forWritingTo: url)
-        try handle.write(contentsOf: Self.header(sampleRate: sampleRate, channelCount: channelCount, dataByteCount: 0))
+        try handle.write(
+            contentsOf: Self.header(
+                sampleRate: sampleRate, channelCount: channelCount, dataByteCount: 0))
         self.handle = handle
     }
 
@@ -61,7 +63,9 @@ final class WAVWriter: PCMWriting {
         guard let handle else { return }
         let dataByteCount = frameCount * channelCount * MemoryLayout<Int16>.size
         try handle.seek(toOffset: 0)
-        try handle.write(contentsOf: Self.header(sampleRate: sampleRate, channelCount: channelCount, dataByteCount: dataByteCount))
+        try handle.write(
+            contentsOf: Self.header(
+                sampleRate: sampleRate, channelCount: channelCount, dataByteCount: dataByteCount))
         try handle.close()
         self.handle = nil
     }
@@ -81,8 +85,8 @@ final class WAVWriter: PCMWriting {
         data.append(littleEndian: UInt32(headerByteCount - 8 + dataByteCount))
         data.append(ascii: "WAVE")
         data.append(ascii: "fmt ")
-        data.append(littleEndian: UInt32(16))            // size of the PCM fmt chunk body
-        data.append(littleEndian: UInt16(1))             // WAVE_FORMAT_PCM
+        data.append(littleEndian: UInt32(16))  // size of the PCM fmt chunk body
+        data.append(littleEndian: UInt16(1))  // WAVE_FORMAT_PCM
         data.append(littleEndian: UInt16(channelCount))
         data.append(littleEndian: UInt32(sampleRate))
         data.append(littleEndian: UInt32(byteRate))

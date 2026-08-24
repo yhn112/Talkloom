@@ -74,7 +74,9 @@ final class MicrophoneCaptureDeviceTests: XCTestCase {
         // Not an assertion about the code — a warning about this machine's input gain, which
         // would distort a real meeting the same way.
         if summary.isClipped {
-            print("  warning: the microphone clipped at \(summary.peakAmplitude); the input volume is too high")
+            print(
+                "  warning: the microphone clipped at \(summary.peakAmplitude); the input volume is too high"
+            )
         }
 
         // The file on disk must agree with what the recorder reported.

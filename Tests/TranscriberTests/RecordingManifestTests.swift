@@ -118,20 +118,20 @@ final class RecordingManifestTests: XCTestCase {
     /// file says whether echo cancellation was applied to it.
     func testLegacyTrackWithoutContentDecodesAsUnknown() throws {
         let json = """
-        {
-          "startedAt": "2023-11-14T22:13:20Z",
-          "status": "completed",
-          "tracks": [
             {
-              "file": "mic.wav",
-              "sampleRate": 48000,
-              "frameCount": 48000,
-              "peakAmplitude": 0.5,
-              "droppedSampleCount": 0
+              "startedAt": "2023-11-14T22:13:20Z",
+              "status": "completed",
+              "tracks": [
+                {
+                  "file": "mic.wav",
+                  "sampleRate": 48000,
+                  "frameCount": 48000,
+                  "peakAmplitude": 0.5,
+                  "droppedSampleCount": 0
+                }
+              ]
             }
-          ]
-        }
-        """
+            """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -143,11 +143,11 @@ final class RecordingManifestTests: XCTestCase {
 
     func testLegacyManifestWithoutStatusDecodesAsCompleted() throws {
         let json = """
-        {
-          "startedAt": "2023-11-14T22:13:20Z",
-          "tracks": []
-        }
-        """
+            {
+              "startedAt": "2023-11-14T22:13:20Z",
+              "tracks": []
+            }
+            """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -160,12 +160,12 @@ final class RecordingManifestTests: XCTestCase {
 
     func testLegacyFailedManifestWithoutStatusDecodesAsFailed() throws {
         let json = """
-        {
-          "startedAt": "2023-11-14T22:13:20Z",
-          "tracks": [],
-          "failure": "capture stopped"
-        }
-        """
+            {
+              "startedAt": "2023-11-14T22:13:20Z",
+              "tracks": [],
+              "failure": "capture stopped"
+            }
+            """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
