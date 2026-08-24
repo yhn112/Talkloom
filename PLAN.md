@@ -80,6 +80,10 @@ survive rebuilds.
   it; an aggregate device that contains the output device as well as the tap delivers two
   streams and the tap is not the first; a tap that has died goes on producing a valid,
   silent file. See `docs/system-audio-capture.md` for the measurements.
+- Still open: a recording interrupted by a crash or a kill leaves WAV headers claiming
+  zero bytes, so the tracks read as empty even though the samples are on disk. The sizes
+  can be recovered from the file length; do it on launch for any session without a
+  `session.json`.
 - ✅ Done when: after a call, two clean tracks exist on disk, verified by measured peak
   amplitude on each — not by file size.
 
@@ -114,6 +118,11 @@ survive rebuilds.
 - Model settings, history, cross-meeting search, sharing.
 
 ## Risks
+
+Concrete capture correctness and simplification work discovered during implementation is
+tracked in [`docs/technical-debt.md`](docs/technical-debt.md). Resolve its P0 items before
+building Stage 2 on top of the recorded timeline.
+
 - **Process tap behaviour under device changes** is the least documented part of the
   capture path; budget time for it.
 - **Whisper hallucinations on silence** — VAD is the mitigation, plus filtering on
