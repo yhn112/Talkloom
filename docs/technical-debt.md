@@ -144,14 +144,6 @@ diagnostic rejects exactly the recordings the project produces.
 diagnostic while preserving each track's manifest offset, covered by synthetic tracks whose
 rates differ and whose known alignment must survive conversion.
 
-### D19 — the Python tooling has no smoke check in the gate
-`open · P2 · code risk` — `pyproject.toml` and `uv.lock` now record `numpy`, `soundfile`
-and `jiwer` so `.venv` can be rebuilt with `uv sync` (`3d9a42a`), and `scripts/doctor.sh`
-reports whether the three import. Nothing runs the scripts themselves in
-`scripts/check.sh`, so one broken by an edit is discovered only when someone needs it.
-**Exit:** a hardware-free smoke check for the three scripts in the gate. `.venv` stays a
-derived local artifact.
-
 ### D20 — device diagnostics are experiments wearing the shape of tests
 `open · P1 · reproduced` — Startup timing tests mostly print without asserting; the
 voice-processing layout test proves only that channel zero is non-silent, and its real-time

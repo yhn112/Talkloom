@@ -342,8 +342,9 @@ history are in `docs/process.md`. Read it before the first commit of a session.
 ## What counts as verified
 
 `scripts/check.sh` is the gate for everything that does not need hardware: it regenerates
-the project, checks the instructions for drift, checks formatting, builds, and runs the
-hardware-free tests, and it exits non-zero on the first failure. Run it before saying a change is done. It takes about six
+the project, checks the instructions for drift, checks that the Python tooling starts,
+checks formatting, builds, and runs the hardware-free tests, and it exits non-zero on the
+first failure. Run it before saying a change is done. It takes about six
 seconds, so there is no reason to skip it.
 
 A green run there is not the same as working capture. It is compatible with a valid WAV

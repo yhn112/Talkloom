@@ -14,8 +14,8 @@ description: Build, sign, and launch Transcriber.app, run the tests, and read th
 scripts/check.sh
 ```
 
-Regenerates the project, checks the instructions for drift, checks formatting, builds, and
-runs the hardware-free tests — about six seconds, one line per step, non-zero exit on the
+Regenerates the project, checks the instructions for drift, checks that the Python tooling
+starts, checks formatting, builds, and runs the hardware-free tests — about six seconds, one line per step, non-zero exit on the
 first failure. Use it for every ordinary change; the steps below are for when something
 needs to be done by hand, and for running the app.
 
