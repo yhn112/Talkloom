@@ -92,3 +92,19 @@ schemes:
       config: Debug
       targets:
         - TranscriberTests
+
+  # The tests that record from the real microphone. They are a separate scheme rather than
+  # an environment variable on the command line because xcodebuild does not forward the
+  # shell's environment to the test host — the variable has to come from the scheme.
+  # Opt-in, since they need a microphone and make audible noise.
+  TranscriberDeviceTests:
+    build:
+      targets:
+        Transcriber: all
+        TranscriberTests: [test]
+    test:
+      config: Debug
+      targets:
+        - TranscriberTests
+      environmentVariables:
+        TRANSCRIBER_DEVICE_TESTS: "1"

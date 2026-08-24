@@ -61,6 +61,25 @@ xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
 `xcodebuild` output is verbose. When diagnosing failures, search for `error:` and
 `Test Case '-[...]' failed` rather than reading the whole log.
 
+### Tests that use the real microphone
+
+Capture code is only verified against a real recording, so those tests live in the
+`TranscriberDeviceTests` scheme and are skipped by every other run:
+
+```bash
+xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceTests \
+  -derivedDataPath build test \
+  -only-testing:TranscriberTests/MicrophoneCaptureDeviceTests
+```
+
+They record from the microphone and speak out loud for a few seconds. They print the
+measured rate, duration, peak amplitude and dropped-sample count for each track — those
+numbers are what a capture commit has to carry.
+
+A separate scheme rather than an environment variable on the command line: `xcodebuild`
+does not forward the shell's environment to the test host, so `TRANSCRIBER_DEVICE_TESTS`
+has to come from the scheme itself.
+
 ## When it doesn't work
 
 - **`xcodebuild` missing, or complaining about the license** — only Command Line Tools are

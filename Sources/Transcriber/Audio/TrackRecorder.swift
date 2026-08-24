@@ -40,6 +40,13 @@ actor TrackRecorder {
 
         var duration: TimeInterval { Double(frameCount) / sampleRate }
         var isSilent: Bool { peakAmplitude < 0.001 }
+
+        /// The device delivered samples outside `[-1, 1]`. Float32 audio is not clamped by
+        /// the hardware, so an input gain set too high arrives intact and is only truncated
+        /// when it reaches Int16 — measured at 2.03 with a microphone next to loud
+        /// speakers. The result is a distorted recording, which ASR handles badly, so it is
+        /// worth saying out loud rather than leaving to be noticed by ear.
+        var isClipped: Bool { peakAmplitude > 1 }
     }
 
     let label: String
