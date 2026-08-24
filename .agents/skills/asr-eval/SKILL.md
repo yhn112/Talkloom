@@ -3,7 +3,7 @@ name: asr-eval
 description: Measure recognition quality in Russian and English — WER, CER, hallucinations on silence, speed, and memory. Use when changing the ASR model or engine, when tuning VAD or chunking, and when transcripts come out poor. Do not use to diagnose the recording itself — that is audio-doctor.
 ---
 
-# Evaluating recognition quality
+# Evaluating ASR quality
 
 ASR changes are accepted on measurement, not on impression. "Sounds better" is not a
 result: a change that improves English usually degrades Russian, and loosening filters

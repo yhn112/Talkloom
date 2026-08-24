@@ -58,7 +58,7 @@ bring both tracks to a shared origin explicitly.
 Float32, byte order, or channel interleaving.
 
 **Clipping.** Either the input level is too high, or the tracks were summed without
-headroom. Mixing the tracks is separately forbidden by `CLAUDE.md`.
+headroom. Mixing the tracks is separately forbidden by `AGENTS.md`.
 
 ## Rules
 

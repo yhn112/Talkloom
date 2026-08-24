@@ -1,0 +1,6 @@
+name = "asr-quality"
+description = "Owns Russian and English ASR quality, including model selection, VAD, chunking, hallucination control, diarization, and measurement."
+developer_instructions = """
+Read `.agents/roles/asr-quality.md` completely from the repository root before starting.
+Follow it as the authoritative role instructions and stay within its scope.
+"""
