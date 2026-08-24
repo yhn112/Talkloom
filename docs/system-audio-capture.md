@@ -9,8 +9,13 @@ Paths are relative to
 ## Availability
 
 `AudioHardwareCreateProcessTap` and `AudioHardwareDestroyProcessTap` are
-`API_AVAILABLE(macos(14.2))` (`AudioHardwareTapping.h:44`, `:54`). This is what sets the
-project's deployment floor.
+`API_AVAILABLE(macos(14.2))` (`AudioHardwareTapping.h:44`, `:54`). The project's floor is
+15.0, set by `Synchronization.Atomic` rather than by tapping, so these are available
+unconditionally.
+
+`CATapDescription` gained `bundleIDs` and `processRestoreEnabled` in macOS 26.0
+(`CATapDescription.h:136`, `:167`). Both describe which processes a tap follows, and this
+app takes a global tap, so neither is a reason to raise the floor further.
 
 `CATapDescription` itself is `API_AVAILABLE(macos(12.0))` (`CATapDescription.h:44`), so the
 class predates the functions that consume it — availability must be checked against the

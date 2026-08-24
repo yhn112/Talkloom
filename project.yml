@@ -6,7 +6,14 @@ name: Transcriber
 options:
   bundleIdPrefix: me.diskin
   deploymentTarget:
-    macOS: "14.2"          # floor imposed by CoreAudio process taps
+    # CoreAudio process taps need 14.2; the floor is 15.0 because `Synchronization.Atomic`
+    # is, and the ring buffer would otherwise carry a package dependency for cursors the
+    # standard library already provides. Nothing above 15 buys anything measured: the tap
+    # additions in 26 (`bundleIDs`, `processRestoreEnabled`) apply to per-process taps and
+    # this app takes a global one, and macOS 26's SpeechTranscriber lists 30 locales with
+    # no Russian among them, so it cannot transcribe half of the meetings this is for.
+    macOS: "15.0"
+
   createIntermediateGroups: true
   generateEmptyDirectories: true
 
@@ -51,18 +58,6 @@ packages:
   TranscriberCore:
     path: Packages/TranscriberCore
 
-  # Lock-free cursors for the capture ring buffer. Swift's own `Synchronization.Atomic`
-  # would do, but it is macOS 15+, and the deployment floor here is 14.2.
-  #
-  # Pinned exactly rather than `from:`. Package.resolved lives inside the generated
-  # .xcodeproj, which is not in git, so nothing else in the repository records which
-  # version was built. With a range, a clean checkout could silently resolve to a
-  # different one, and the first place that would show up is a ring buffer that stopped
-  # being lock-free. Raising it is a deliberate edit here.
-  Atomics:
-    url: https://github.com/apple/swift-atomics
-    exactVersion: "1.3.1"
-
 targets:
   Transcriber:
     type: application
@@ -79,7 +74,6 @@ targets:
     dependencies:
       - sdk: AVFoundation.framework
       - sdk: CoreAudio.framework
-      - package: Atomics
       - package: TranscriberCore
 
   TranscriberTests:

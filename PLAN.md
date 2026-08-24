@@ -71,7 +71,7 @@ survive rebuilds.
 - Microphone via `AVAudioEngine` with Voice Processing IO, so speaker output doesn't
   echo back into the mic track and duplicate every line.
 - System audio via `AudioHardwareCreateProcessTap` plus an aggregate device
-  (available since macOS 14.2).
+  (available since macOS 14.2; the app's own floor is 15.0).
 - Write two files in the device's own format; resampling to 16 kHz happens later, over
   the finished file, never on the audio path.
 - Known traps, all of which present as a valid file rather than as an error: Voice

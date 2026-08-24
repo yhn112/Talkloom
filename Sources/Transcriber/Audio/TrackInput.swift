@@ -1,6 +1,6 @@
 import AVFoundation
-import Atomics
 import CoreAudio
+import Synchronization
 
 /// The producer's end of one recorded track — everything an audio callback is allowed to
 /// touch, and nothing else.
@@ -27,14 +27,14 @@ final class TrackInput: @unchecked Sendable {
     /// capture paths hand over a mach timestamp taken by the audio hardware, and mach time
     /// is one clock for the whole machine — so the microphone and the system tap can be
     /// lined up against each other exactly, however far apart they happened to start.
-    private let firstHostTime: UnsafeAtomic<UInt64>
+    private let firstHostTime = Atomic<UInt64>(0)
 
     /// Shape of the most recent block — buffer count, channels in the first buffer, and its
     /// size — kept for diagnosing a track whose length does not match the wall clock.
-    private let lastListShape = UnsafeAtomic<UInt64>.create(0)
+    private let lastListShape = Atomic<UInt64>(0)
 
     /// Blocks refused because the buffer list was not the single buffer expected.
-    private let unexpectedLayouts = UnsafeAtomic<Int>.create(0)
+    private let unexpectedLayouts = Atomic<Int>(0)
 
     /// - Parameters:
     ///   - ringCapacity: samples of headroom for the consumer, at the *source* sample rate.
@@ -45,15 +45,11 @@ final class TrackInput: @unchecked Sendable {
         scratchCapacity = maximumFrameCount
         scratch = .allocate(capacity: maximumFrameCount)
         scratch.initialize(repeating: 0, count: maximumFrameCount)
-        firstHostTime = .create(0)
     }
 
     deinit {
         scratch.deinitialize(count: scratchCapacity)
         scratch.deallocate()
-        firstHostTime.destroy()
-        lastListShape.destroy()
-        unexpectedLayouts.destroy()
     }
 
     /// Records the timestamp of the first block, ignoring every one after it. Real-time
@@ -120,7 +116,7 @@ final class TrackInput: @unchecked Sendable {
 
         let channelCount = Int(first.mNumberChannels)
         guard buffers.count == 1, channelCount > 0, let data = first.mData else {
-            unexpectedLayouts.wrappingIncrement(ordering: .relaxed)
+            _ = unexpectedLayouts.wrappingAdd(1, ordering: .relaxed)
             return false
         }
         guard first.mDataByteSize > 0 else { return true }

@@ -225,6 +225,18 @@ compiler warnings. UI is `@MainActor`, capture runs on a dedicated actor or thre
 on its own actor. `@unchecked Sendable` is acceptable only for the ring buffer, and only
 with a comment stating what makes it safe.
 
+`SWIFT_VERSION` is the language mode, and `6.0` already means mode 6; there is no `6.2`
+mode to move to. Compiler features from later releases — `@concurrent`,
+`nonisolated(nonsending)` — come with the toolchain and are available now.
+
+Default `MainActor` isolation (`-default-isolation MainActor`, Swift 6.2) is deliberately
+**not** enabled. It suits an app whose types are mostly UI; here most types exist
+specifically to be off the main actor — the ring buffer, the track input, the recorders —
+and the setting would turn every one of them into an annotation exercise.
+
+Locks and atomics come from `Synchronization` in the standard library. The floor is
+macOS 15.0 exactly so that they can.
+
 ### Where code goes
 
 Two places, and the line between them is testability, not tidiness.

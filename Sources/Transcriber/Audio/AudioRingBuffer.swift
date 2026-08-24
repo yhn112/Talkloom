@@ -1,4 +1,4 @@
-import Atomics
+import Synchronization
 
 /// A lock-free single-producer / single-consumer ring buffer of Float32 samples.
 ///
@@ -10,9 +10,10 @@ import Atomics
 ///
 /// `@unchecked Sendable` is the exception `AGENTS.md` allows, and it rests on three
 /// properties. The storage is allocated in `init` and freed in `deinit`, so its address
-/// never changes while the buffer is alive. Exactly one thread calls `write` and exactly
-/// one calls `read`, so each cursor has a single writer and needs no compare-and-exchange.
-/// The cursors are exchanged with release/acquire ordering, which publishes the samples
+/// never changes while the buffer is alive — it is the raw pointer, not the cursors, that
+/// the compiler cannot check. Exactly one thread calls `write` and exactly one calls
+/// `read`, so each cursor has a single writer and needs no compare-and-exchange. The
+/// cursors are exchanged with release/acquire ordering, which publishes the samples
 /// written before the cursor moved. Calling `write` from two threads at once breaks all of
 /// this.
 final class AudioRingBuffer: @unchecked Sendable {
@@ -25,9 +26,13 @@ final class AudioRingBuffer: @unchecked Sendable {
     /// Total samples ever written and ever read. Both only increase; their difference is
     /// the fill level. Keeping them unwrapped is what makes "empty" and "full"
     /// distinguishable without sacrificing a slot.
-    private let writeCursor: UnsafeAtomic<Int>
-    private let readCursor: UnsafeAtomic<Int>
-    private let droppedCursor: UnsafeAtomic<Int>
+    ///
+    /// `Synchronization.Atomic` stores the value inline in this object, so there is nothing
+    /// to allocate in `init` and nothing to destroy in `deinit`, and every operation is
+    /// emitted into the caller — which is what an audio callback needs.
+    private let writeCursor = Atomic<Int>(0)
+    private let readCursor = Atomic<Int>(0)
+    private let droppedCursor = Atomic<Int>(0)
 
     /// - Parameter capacity: minimum number of samples to hold; rounded up to a power of
     ///   two. Size it for the worst pause the consumer can take, not for one callback:
@@ -39,17 +44,11 @@ final class AudioRingBuffer: @unchecked Sendable {
         self.mask = capacity - 1
         self.storage = .allocate(capacity: capacity)
         self.storage.initialize(repeating: 0, count: capacity)
-        self.writeCursor = .create(0)
-        self.readCursor = .create(0)
-        self.droppedCursor = .create(0)
     }
 
     deinit {
         storage.deinitialize(count: capacity)
         storage.deallocate()
-        writeCursor.destroy()
-        readCursor.destroy()
-        droppedCursor.destroy()
     }
 
     /// Every sample the producer has ever written. Only ever increases, so a value that
@@ -75,7 +74,7 @@ final class AudioRingBuffer: @unchecked Sendable {
     /// A block too large to be downmixed is lost just as surely as one that did not fit, and
     /// a hole in the recording should be counted the same way whichever end dropped it.
     func recordDrop(sampleCount: Int) {
-        droppedCursor.wrappingIncrement(by: sampleCount, ordering: .relaxed)
+        _ = droppedCursor.wrappingAdd(sampleCount, ordering: .relaxed)
     }
 
     /// Copies `count` samples in. Real-time safe: no allocation, no locks, no ARC.
@@ -89,7 +88,7 @@ final class AudioRingBuffer: @unchecked Sendable {
         let writeIndex = writeCursor.load(ordering: .relaxed)
         let readIndex = readCursor.load(ordering: .acquiring)
         guard capacity - (writeIndex - readIndex) >= count else {
-            droppedCursor.wrappingIncrement(by: count, ordering: .relaxed)
+            _ = droppedCursor.wrappingAdd(count, ordering: .relaxed)
             return false
         }
 

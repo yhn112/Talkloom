@@ -17,7 +17,7 @@ import PackageDescription
 // path is not where a boundary should be paid for.
 let package = Package(
     name: "TranscriberCore",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"])
     ],
