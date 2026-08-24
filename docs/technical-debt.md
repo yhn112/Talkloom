@@ -48,13 +48,10 @@ offsets, gap length, and post-restart signal.
 production code and duplicate the final summary. **Exit:** return only what a caller uses.
 
 ### D6 — CoreAudio resources have no single owner
-`open · P1 · code risk` — Tap, aggregate-device and IOProc cleanup is repeated in normal
-stop, `deinit`, and initial rollback; some error paths omit part of it and every teardown
-status is discarded. One concrete leak: after `createTap()` succeeds but before the
-recorder is installed, a `TrackRecorder` that cannot create its WAV writer leaves the local
-tap handle neither destroyed nor stored in `self.tap`, so neither `stop()` nor `deinit` can
-reach it. Teardown also forgets resource IDs when a destroy call fails, leaving nothing to
-retry or diagnose.
+`open · P1 · code risk` — Tap, aggregate-device and IOProc teardown still has no owner that
+retains a resource after its destroy call fails. Acquisition rollback and normal teardown
+now share the Swift handle wrappers and log failures, but the caller discards those wrappers
+afterwards, leaving nothing to retry.
 **Exit:** one resource owner that acquires IDs step by step, destroys them in reverse
 order, logs teardown failures, and stays responsible until cleanup succeeds — replacing the
 duplicated branches rather than wrapping them.

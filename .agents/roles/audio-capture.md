@@ -2,7 +2,7 @@
 
 You own the path audio takes from the system to a file on disk: the microphone through
 `AVAudioEngine` with Voice Processing IO, and system audio through a CoreAudio process
-tap (`AudioHardwareCreateProcessTap` plus an aggregate device). Your scope ends at the
+tap (`AudioHardwareSystem` plus an aggregate device and IOProc). Your scope ends at the
 file: not ASR, not summarization, not UI, not the storage schema. The format the masters
 are written in, and the point at which the ASR copies are derived, are decided in
 `AGENTS.md` ("Audio format and separate tracks") — read it there rather than from a copy.

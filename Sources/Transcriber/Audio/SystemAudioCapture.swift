@@ -11,46 +11,38 @@ import Foundation
 /// A tap produces nothing on its own: it has to be wrapped in a private aggregate device.
 actor SystemAudioCapture {
     enum Failure: Error, LocalizedError {
-        case tapCreationFailed(OSStatus)
-        case tapFormatUnavailable(OSStatus)
-        case aggregateCreationFailed(OSStatus)
-        case ioProcCreationFailed(OSStatus)
-        case deviceStartFailed(OSStatus)
+        case tapCreationFailed(String)
+        case tapFormatUnavailable(String)
+        case tapUIDUnavailable(String)
+        case aggregateCreationFailed(String)
+        case ioProcCreationFailed(String)
+        case deviceStartFailed(String)
         case unusableTapFormat(sampleRate: Double, channelCount: UInt32)
 
         var errorDescription: String? {
             switch self {
-            case .tapCreationFailed(let status):
-                "Could not tap the system audio (\(Self.describe(status))). Grant Transcriber access under System Settings › Privacy & Security › Audio Recording."
-            case .tapFormatUnavailable(let status):
-                "The system audio tap did not report its format (\(Self.describe(status)))."
-            case .aggregateCreationFailed(let status):
-                "Could not create the aggregate device for the system audio tap (\(Self.describe(status)))."
-            case .ioProcCreationFailed(let status):
-                "Could not attach to the system audio tap (\(Self.describe(status)))."
-            case .deviceStartFailed(let status):
-                "Could not start the system audio tap (\(Self.describe(status)))."
+            case .tapCreationFailed(let detail):
+                "Could not tap the system audio (\(detail)). Grant Transcriber access under System Settings › Privacy & Security › Audio Recording."
+            case .tapFormatUnavailable(let detail):
+                "The system audio tap did not report its format (\(detail))."
+            case .tapUIDUnavailable(let detail):
+                "The system audio tap did not report its UID (\(detail))."
+            case .aggregateCreationFailed(let detail):
+                "Could not create the aggregate device for the system audio tap (\(detail))."
+            case .ioProcCreationFailed(let detail):
+                "Could not attach to the system audio tap (\(detail))."
+            case .deviceStartFailed(let detail):
+                "Could not start the system audio tap (\(detail))."
             case .unusableTapFormat(let sampleRate, let channelCount):
                 "The system audio tap reported an unusable format (\(sampleRate) Hz, \(channelCount) channels)."
             }
-        }
-
-        /// OSStatus values in this API are four-character codes far more often than numbers.
-        private static func describe(_ status: OSStatus) -> String {
-            let bytes = [24, 16, 8, 0].map {
-                UInt8((UInt32(bitPattern: status) >> UInt32($0)) & 0xFF)
-            }
-            guard bytes.allSatisfy({ (0x20...0x7E).contains($0) }) else {
-                return "status \(status)"
-            }
-            return "'\(String(decoding: bytes, as: UTF8.self))'"
         }
     }
 
     /// One live tap: the objects that have to be torn down together, in this order.
     private struct Tap {
-        var tapID: AudioObjectID
-        var aggregateID: AudioObjectID
+        var processTap: AudioHardwareTap
+        var aggregateDevice: AudioHardwareAggregateDevice
         var ioProcID: AudioDeviceIOProcID?
         var format: AudioStreamBasicDescription
     }
@@ -79,12 +71,7 @@ actor SystemAudioCapture {
         if let tap {
             AppLog.capture.error(
                 "the system audio tap was dropped without being stopped; tearing it down")
-            if let ioProcID = tap.ioProcID {
-                AudioDeviceStop(tap.aggregateID, ioProcID)
-                AudioDeviceDestroyIOProcID(tap.aggregateID, ioProcID)
-            }
-            AudioHardwareDestroyAggregateDevice(tap.aggregateID)
-            AudioHardwareDestroyProcessTap(tap.tapID)
+            Self.destroy(tap, context: "deinit fallback")
         }
         watchdogTask?.cancel()
     }
@@ -100,25 +87,31 @@ actor SystemAudioCapture {
         let probe = try createTap()
         let sampleRate = probe.format.mSampleRate
         guard sampleRate > 0, probe.format.mChannelsPerFrame > 0 else {
-            destroy(probe)
+            Self.destroy(probe, context: "rejecting an unusable tap format")
             throw Failure.unusableTapFormat(
                 sampleRate: sampleRate,
                 channelCount: probe.format.mChannelsPerFrame
             )
         }
 
-        let recorder = try TrackRecorder(
-            label: "system",
-            url: url,
-            sampleRate: sampleRate,
-            content: .remote
-        )
+        let recorder: TrackRecorder
         do {
-            var running = probe
+            recorder = try TrackRecorder(
+                label: "system",
+                url: url,
+                sampleRate: sampleRate,
+                content: .remote
+            )
+        } catch {
+            Self.destroy(probe, context: "rolling back track recorder creation")
+            throw error
+        }
+        var running = probe
+        do {
             try attachAndStart(&running, feeding: recorder.input)
             self.tap = running
         } catch {
-            destroy(probe)
+            Self.destroy(running, context: "rolling back a failed system audio start")
             _ = await recorder.finish()
             try? FileManager.default.removeItem(at: url)
             throw error
@@ -178,7 +171,7 @@ actor SystemAudioCapture {
         watchdogTask?.cancel()
         watchdogTask = nil
         if let tap {
-            destroy(tap)
+            Self.destroy(tap, context: "stopping system audio capture")
             self.tap = nil
         }
 
@@ -223,38 +216,50 @@ actor SystemAudioCapture {
         // the meeting for the user, which is a recorder, not a mute button.
         description.muteBehavior = .unmuted
 
-        var tapID = AudioObjectID(kAudioObjectUnknown)
-        let tapStatus = AudioHardwareCreateProcessTap(description, &tapID)
-        guard tapStatus == noErr, tapID != AudioObjectID(kAudioObjectUnknown) else {
-            throw Failure.tapCreationFailed(tapStatus)
+        let processTap: AudioHardwareTap
+        do {
+            guard
+                let created = try AudioHardwareSystem.shared.makeProcessTap(
+                    description: description)
+            else {
+                throw Failure.tapCreationFailed("CoreAudio returned no tap object")
+            }
+            processTap = created
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            throw Failure.tapCreationFailed(Self.describe(error))
         }
 
         do {
             // Read the format the tap actually reports rather than assuming one. Assuming
             // here is what produces a valid file full of silence.
-            let format = try readTapFormat(tapID)
-            let aggregateID = try createAggregate(around: description.uuid.uuidString)
-            return Tap(tapID: tapID, aggregateID: aggregateID, ioProcID: nil, format: format)
+            let format: AudioStreamBasicDescription
+            do {
+                format = try processTap.format
+            } catch {
+                throw Failure.tapFormatUnavailable(Self.describe(error))
+            }
+            let tapUID: String
+            do {
+                tapUID = try processTap.uid
+            } catch {
+                throw Failure.tapUIDUnavailable(Self.describe(error))
+            }
+            let aggregateDevice = try createAggregate(around: tapUID)
+            return Tap(
+                processTap: processTap,
+                aggregateDevice: aggregateDevice,
+                ioProcID: nil,
+                format: format
+            )
         } catch {
-            AudioHardwareDestroyProcessTap(tapID)
+            Self.destroyProcessTap(processTap, context: "rolling back tap creation")
             throw error
         }
     }
 
-    private func readTapFormat(_ tapID: AudioObjectID) throws -> AudioStreamBasicDescription {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var format = AudioStreamBasicDescription()
-        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        let status = AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, &format)
-        guard status == noErr else { throw Failure.tapFormatUnavailable(status) }
-        return format
-    }
-
-    private func createAggregate(around tapUID: String) throws -> AudioObjectID {
+    private func createAggregate(around tapUID: String) throws -> AudioHardwareAggregateDevice {
         // The tap is the only member. Adding the default output device as a sub-device is
         // the widely published recipe, and it costs more than it gives: the aggregate then
         // carries that device's own input stream as well, so the IO block receives two
@@ -282,18 +287,27 @@ actor SystemAudioCapture {
             ],
         ]
 
-        var aggregateID = AudioObjectID(kAudioObjectUnknown)
-        let status = AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateID)
-        guard status == noErr, aggregateID != AudioObjectID(kAudioObjectUnknown) else {
-            throw Failure.aggregateCreationFailed(status)
+        do {
+            guard
+                let aggregate = try AudioHardwareSystem.shared.makeAggregateDevice(
+                    description: description)
+            else {
+                throw Failure.aggregateCreationFailed(
+                    "CoreAudio returned no aggregate device object")
+            }
+            return aggregate
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            throw Failure.aggregateCreationFailed(Self.describe(error))
         }
-        return aggregateID
     }
 
     private func attachAndStart(_ tap: inout Tap, feeding trackInput: TrackInput) throws {
         var ioProcID: AudioDeviceIOProcID?
-        let createStatus = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, tap.aggregateID, ioQueue) {
-            _, inputData, inputTime, _, _ in
+        let createStatus = AudioDeviceCreateIOProcIDWithBlock(
+            &ioProcID, tap.aggregateDevice.id, ioQueue
+        ) { _, inputData, inputTime, _, _ in
             // Real-time context: a timestamp store and a copy into a preallocated ring
             // buffer, nothing else.
             if inputTime.pointee.mFlags.contains(.hostTimeValid) {
@@ -302,27 +316,79 @@ actor SystemAudioCapture {
             trackInput.write(inputData)
         }
         guard createStatus == noErr, let ioProcID else {
-            throw Failure.ioProcCreationFailed(createStatus)
+            throw Failure.ioProcCreationFailed(Self.describe(createStatus))
         }
         tap.ioProcID = ioProcID
 
-        let startStatus = AudioDeviceStart(tap.aggregateID, ioProcID)
-        guard startStatus == noErr else {
-            AudioDeviceDestroyIOProcID(tap.aggregateID, ioProcID)
-            tap.ioProcID = nil
-            throw Failure.deviceStartFailed(startStatus)
+        do {
+            try tap.aggregateDevice.start(IOProcID: ioProcID)
+        } catch {
+            let destroyStatus = AudioDeviceDestroyIOProcID(tap.aggregateDevice.id, ioProcID)
+            if destroyStatus != noErr {
+                AppLog.capture.error(
+                    "could not destroy the IOProc after device start failed: \(Self.describe(destroyStatus), privacy: .public)"
+                )
+            } else {
+                tap.ioProcID = nil
+            }
+            throw Failure.deviceStartFailed(Self.describe(error))
         }
     }
 
     /// Tears a tap down in the order the objects depend on each other. An aggregate device
     /// that is never destroyed outlives the process.
-    private func destroy(_ tap: Tap) {
+    private static func destroy(_ tap: Tap, context: String) {
         if let ioProcID = tap.ioProcID {
-            AudioDeviceStop(tap.aggregateID, ioProcID)
-            AudioDeviceDestroyIOProcID(tap.aggregateID, ioProcID)
+            do {
+                try tap.aggregateDevice.stop(IOProcID: ioProcID)
+            } catch {
+                AppLog.capture.error(
+                    "\(context, privacy: .public): could not stop the aggregate device: \(Self.describe(error), privacy: .public)"
+                )
+            }
+            let status = AudioDeviceDestroyIOProcID(tap.aggregateDevice.id, ioProcID)
+            if status != noErr {
+                AppLog.capture.error(
+                    "\(context, privacy: .public): could not destroy the IOProc: \(Self.describe(status), privacy: .public)"
+                )
+            }
         }
-        AudioHardwareDestroyAggregateDevice(tap.aggregateID)
-        AudioHardwareDestroyProcessTap(tap.tapID)
+        do {
+            try AudioHardwareSystem.shared.destroyAggregateDevice(tap.aggregateDevice)
+        } catch {
+            AppLog.capture.error(
+                "\(context, privacy: .public): could not destroy the aggregate device: \(Self.describe(error), privacy: .public)"
+            )
+        }
+        Self.destroyProcessTap(tap.processTap, context: context)
+    }
+
+    private static func destroyProcessTap(_ tap: AudioHardwareTap, context: String) {
+        do {
+            try AudioHardwareSystem.shared.destroyProcessTap(tap)
+        } catch {
+            AppLog.capture.error(
+                "\(context, privacy: .public): could not destroy the process tap: \(Self.describe(error), privacy: .public)"
+            )
+        }
+    }
+
+    private static func describe(_ error: any Error) -> String {
+        if let hardwareError = error as? AudioHardwareError {
+            return describe(hardwareError.error)
+        }
+        return error.localizedDescription
+    }
+
+    /// OSStatus values in this API are four-character codes far more often than numbers.
+    private static func describe(_ status: OSStatus) -> String {
+        let bytes = [24, 16, 8, 0].map {
+            UInt8((UInt32(bitPattern: status) >> UInt32($0)) & 0xFF)
+        }
+        guard bytes.allSatisfy({ (0x20...0x7E).contains($0) }) else {
+            return "status \(status)"
+        }
+        return "'\(String(decoding: bytes, as: UTF8.self))'"
     }
 
     // MARK: - Surviving a dead tap

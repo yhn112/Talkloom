@@ -98,26 +98,11 @@ extension DeviceTests {
         /// processing is deliberately left enabled between recordings, and the promise that
         /// comes with that is checked here rather than taken on trust: a stopped engine must
         /// release the device even though its unit is still configured.
-        private func inputDeviceIsRunning() -> Bool {
-            var address = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            var deviceID = AudioObjectID(kAudioObjectUnknown)
-            var size = UInt32(MemoryLayout<AudioObjectID>.size)
-            guard
-                AudioObjectGetPropertyData(
-                    AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
-                    == noErr
-            else { return false }
-
-            address.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
-            var running: UInt32 = 0
-            size = UInt32(MemoryLayout<UInt32>.size)
-            guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &running) == noErr
-            else { return false }
-            return running != 0
+        private func inputDeviceIsRunning() throws -> Bool {
+            guard let device = try AudioHardwareSystem.shared.defaultInputDevice else {
+                return false
+            }
+            return try device.isRunningInAProcess
         }
 
         @Test("the microphone is released between recordings")
@@ -126,19 +111,22 @@ extension DeviceTests {
             let directory = try DeviceTests.makeDirectory("Release")
             defer { try? FileManager.default.removeItem(at: directory) }
 
+            let runningBeforeStart = try inputDeviceIsRunning()
             #expect(
-                !inputDeviceIsRunning(),
+                !runningBeforeStart,
                 "something was already using the microphone before the test")
 
             _ = try await microphone.start(writingTo: directory.appending(path: "first.wav"))
             try await Task.sleep(for: .milliseconds(500))
-            #expect(inputDeviceIsRunning(), "recording should hold the device")
+            let runningWhileRecording = try inputDeviceIsRunning()
+            #expect(runningWhileRecording, "recording should hold the device")
 
             _ = await microphone.stop()
             try await Task.sleep(for: .milliseconds(500))
             // Voice processing stays enabled on the node; the device must not stay held.
+            let runningAfterStop = try inputDeviceIsRunning()
             #expect(
-                !inputDeviceIsRunning(),
+                !runningAfterStop,
                 "the microphone is still in use after stopping — the indicator would stay lit while idle"
             )
 

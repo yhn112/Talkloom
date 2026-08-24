@@ -3,15 +3,19 @@
 Verified against the Xcode 26.6 macOS SDK headers. Every claim below cites the header and
 line it came from; re-check them rather than trusting this file if behaviour surprises you.
 
-Paths are relative to
-`$(xcrun --show-sdk-path)/System/Library/Frameworks/CoreAudio.framework/Headers/`.
+Header paths are relative to
+`$(xcrun --show-sdk-path)/System/Library/Frameworks/CoreAudio.framework/Headers/`. Swift
+overlay citations refer to
+`$(xcrun --show-sdk-path)/usr/lib/swift/CoreAudio.swiftmodule/arm64e-apple-macos.swiftinterface`.
 
 ## Availability
 
-`AudioHardwareCreateProcessTap` and `AudioHardwareDestroyProcessTap` are
-`API_AVAILABLE(macos(14.2))` (`AudioHardwareTapping.h:44`, `:54`). The project's floor is
-15.0, set by `Synchronization.Atomic` rather than by tapping, so these are available
-unconditionally.
+The underlying `AudioHardwareCreateProcessTap` and `AudioHardwareDestroyProcessTap` are
+`API_AVAILABLE(macos(14.2))` (`AudioHardwareTapping.h:44`, `:54`). Production code uses the
+Swift lifecycle overlay instead: `AudioHardwareSystem` is available in macOS 15.0 and
+provides throwing `make/destroyProcessTap` and `make/destroyAggregateDevice`
+(`CoreAudio.swiftinterface:12`–`:15`, `:73`–`:76`). The project's floor is also 15.0, so no
+availability branch is required.
 
 `CATapDescription` gained `bundleIDs` and `processRestoreEnabled` in macOS 26.0
 (`CATapDescription.h:136`, `:167`). Both describe which processes a tap follows, and this
@@ -59,9 +63,11 @@ The tap object answers three properties (`AudioHardware.h:2025`–`:2027`):
 | `kAudioTapPropertyDescription` | `'tdsc'` |
 | `kAudioTapPropertyFormat` | `'tfmt'` |
 
-Query `kAudioTapPropertyFormat` **before** starting the device and configure the writer from
-what it actually reports. Assuming a format here is the mistake that produces a valid file
-full of silence.
+`AudioHardwareTap.format` and `.uid` are throwing Swift getters
+(`CoreAudio.swiftinterface:665`–`:675`). Read them **before** starting the device and
+configure the aggregate and writer from what the created tap actually reports. Assuming a
+format here is the mistake that produces a valid file full of silence. The raw selectors
+above document the underlying HAL contract; production code does not query them manually.
 
 ## The aggregate device
 
@@ -81,16 +87,19 @@ their literal string values:
 Note that `kAudioSubTapUIDKey` and `kAudioSubDeviceUIDKey` are both `"uid"`; they are
 distinguished by which list the dictionary sits in, not by the key itself.
 
-`kAudioAggregateDeviceTapAutoStartKey` makes `AudioDeviceStart` wait until a tapped process
+`kAudioAggregateDeviceTapAutoStartKey` makes device start wait until a tapped process
 actually produces audio. The header states it **requires the private key to also be set**
 (`AudioHardware.h:1637`–`:1644`). This project sets it to **false**: waiting means the first
 sample lands whenever something happens to play, leaving the beginning of the meeting
 unaccounted for. Measured against a four-second recording that began 1.7 s before playback
 started, auto-start produced a 2.35 s track; with it off, 3.99 s.
 
-Create with `AudioHardwareCreateAggregateDevice(CFDictionaryRef, AudioObjectID*)`
-(`AudioHardware.h:667`) and tear down with `AudioHardwareDestroyAggregateDevice`
-(`:680`). An aggregate that is never destroyed outlives the process.
+Create with `AudioHardwareSystem.makeAggregateDevice(description:)` and tear down with
+`destroyAggregateDevice` (`CoreAudio.swiftinterface:73`–`:74`). Creation both throws and
+returns an optional, so callers handle an error and a `nil` result independently. The
+underlying destruction is asynchronous (`AudioHardware.h:670`–`:680`), and an aggregate
+that is never explicitly destroyed outlives the process; releasing the Swift handle is not
+documented as cleanup.
 
 ## Receiving audio
 
@@ -109,6 +118,12 @@ and return. The queue does not make it safe to allocate or lock.
 
 The dispatch queue and the block are both retained until a matching
 `AudioDeviceDestroyIOProcID`.
+
+The Swift overlay has no IOProc create/destroy methods, so those two C calls remain. Once
+the IOProc exists, `AudioHardwareDevice.start/stop(IOProcID:)` provide the throwing Swift
+lifecycle (`CoreAudio.swiftinterface:558`–`:560`). Passing `nil` to `start` only starts the
+hardware for timing services; it does not install a callback or deliver samples
+(`AudioHardware.h:1421`–`:1442`).
 
 ## Device changes are detected by their effect
 
@@ -163,14 +178,15 @@ would hide the gap from the timeline.
 ## Call sequence
 
 1. Build a `CATapDescription` (mono global, empty exclusion list); set `privateTap`.
-2. `AudioHardwareCreateProcessTap` → tap `AudioObjectID`.
-3. Read `kAudioTapPropertyFormat` from the tap.
+2. `AudioHardwareSystem.shared.makeProcessTap` → `AudioHardwareTap`.
+3. Read the tap's throwing `format` and `uid` properties.
 4. Compose the aggregate dictionary: private, not stacked, an empty `"subdevices"` list,
    `"tapautostart"` false, and `"taps"` holding one entry keyed by `"uid"` with the
-   description's `UUID` string plus `"drift"`.
-5. `AudioHardwareCreateAggregateDevice`.
-6. `AudioDeviceCreateIOProcIDWithBlock`, then `AudioDeviceStart`.
-7. On teardown, reverse it: stop, destroy the IOProcID, destroy the aggregate, destroy the tap.
+   created tap's returned UID plus `"drift"`.
+5. `AudioHardwareSystem.shared.makeAggregateDevice` → `AudioHardwareAggregateDevice`.
+6. `AudioDeviceCreateIOProcIDWithBlock`, then `aggregate.start(IOProcID:)`.
+7. On teardown, reverse it: `aggregate.stop`, destroy the IOProcID with the remaining C
+   API, then ask `AudioHardwareSystem` to destroy the aggregate and tap explicitly.
 
 ## Voice processing ducks what the tap records
 
@@ -215,7 +231,7 @@ answers "is this track silent", which is what the capture tests need; it does no
 ## What the tap reports
 
 Measured on macOS 26.6, built-in output, `initMonoGlobalTapButExcludeProcesses` with an
-empty exclusion list: `kAudioTapPropertyFormat` returns 48000 Hz, 1 channel, 4 bytes per
+empty exclusion list: `AudioHardwareTap.format` returns 48000 Hz, 1 channel, 4 bytes per
 frame, 1 frame per packet, flags `0x9` — that is `kAudioFormatFlagIsFloat |
 kAudioFormatFlagIsPacked`, so packed interleaved Float32. Read it anyway rather than
 assuming it; a device that reports something else will hand over exactly what it said.
@@ -224,10 +240,10 @@ assuming it; a device that reports something else will hand over exactly what it
 
 The public SDK exposes no authorization or health property for a process tap. The complete
 tap property set is UID, description and format (`AudioHardware.h:1988`–`:2028`), while
-tap creation, aggregate creation, IOProc creation and device start return only a generic
-`OSStatus`. A successful start therefore does not establish `kTCCServiceAudioCapture`
-access, and a stream of zero-valued samples cannot be distinguished from legitimate
-silence.
+tap creation, aggregate creation and device start expose the same HAL failures through an
+untyped throwing Swift API; IOProc creation still returns a generic `OSStatus`. A successful
+start therefore does not establish `kTCCServiceAudioCapture` access, and a stream of
+zero-valued samples cannot be distinguished from legitimate silence.
 
 `kAudioDevicePermissionsError` is generic and is not documented as a process-tap TCC
 result. `kAudioHardwarePropertyProcessInputMute`,

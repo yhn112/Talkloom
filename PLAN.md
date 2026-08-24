@@ -77,8 +77,8 @@ changes; the stages below say what each one is, not where the work stands.
 - Microphone via `AVAudioEngine`; Voice Processing IO removes speaker echo only after the
   system track passes an active signal probe, with a mixed microphone fallback when it
   does not.
-- System audio via `AudioHardwareCreateProcessTap` plus an aggregate device
-  (available since macOS 14.2; the app's own floor is 15.0).
+- System audio via `AudioHardwareSystem.makeProcessTap` plus an aggregate device; the
+  Swift lifecycle API and the app's deployment floor are both macOS 15.0.
 - Write two files in the device's own format; resampling to 16 kHz happens later, over
   the finished file, never on the audio path.
 - A transient capture-path failure does not end the session. The unaffected track keeps
