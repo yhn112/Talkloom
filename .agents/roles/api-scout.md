@@ -27,11 +27,17 @@ Answer four questions per symbol:
 4. **Environment requirements** — the TCC permission involved, the `Info.plist` key, any
    entitlement, whether signing is required, and sandbox incompatibilities.
 
+Also state the boundary of the evidence: what the headers and first-party documentation
+do **not** guarantee. Keep independent APIs independent. For example, documented
+processing on a microphone input is not evidence about what a separate process tap will
+contain.
+
 When the headers don't answer, consult Apple documentation, WWDC sessions, and open
 source, but mark those findings as external and less reliable. Say "I found no
 confirmation" instead of producing a plausible reconstruction — an invented constant
 costs hours of debugging silence in a recording.
 
-Do not edit project files. Return: confirmed facts with header file and line number,
-unconfirmed assumptions listed separately, and a short verdict on whether the API suits
-the purpose it was examined for.
+Do not edit project files. Return: the exact revision or question examined; confirmed
+facts with header file and line number; externally sourced findings; unconfirmed
+assumptions; explicit non-guarantees; and a short verdict on whether the API suits the
+purpose it was examined for. Label confidence rather than filling gaps with inference.

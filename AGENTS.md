@@ -33,12 +33,96 @@ a diff, and drift out of sync with the code they govern.
 When the user establishes a new rule, write it into the appropriate file in this
 repository as part of the same change.
 
+Technical-debt records are living handoffs, not a historical notebook. Each item names
+its status, evidence, exit criterion, and the commit that introduced or resolved it when
+known. A change that resolves or invalidates an item updates the debt record in the same
+logical change. Before prioritizing an old P0, reconcile it against the current code and
+reproduce it; stale severity is not evidence.
+
 ### Design for this project, not by analogy with other repositories
 
 Do not go looking through other repositories on this machine for conventions to copy.
 Those projects solved different problems; their structure is noise here. Decisions come
 from this project's requirements and from verified facts about this environment. Read
 another repository only when the user points at it explicitly.
+
+### Work in short, evidence-driven cycles
+
+Before implementing a non-trivial change, write down the decision that makes the change
+necessary. At minimum, establish:
+
+- whether the behavior is needed live or can happen after recording;
+- which artifact is the source of truth and which artifacts are derived;
+- whether macOS or an existing project dependency already provides the operation;
+- whether a product choice, permission, dependency, or hardware requirement needs the
+  user's decision before the architecture is chosen.
+
+Do not build a project-specific subsystem before checking the platform tool that would
+replace it. Do not continue through a consequential ambiguity just because one option is
+technically implementable.
+
+Use this order for unfamiliar behavior: project invariants, SDK headers, first-party
+documentation when the headers are insufficient, the smallest controlled experiment,
+then production code. An experiment tests a stated hypothesis; it is not a substitute
+for deciding what the product needs.
+
+Keep each cycle small enough to review and interrupt safely:
+
+1. State one question or hypothesis.
+2. Make the smallest change that can answer it.
+3. Run the narrow deterministic check.
+4. Run a real-device or human-assisted check only when the question requires one.
+5. Record the evidence and unresolved conditions.
+6. Review a fixed diff, then checkpoint the logical change before beginning an unrelated
+   experiment or refactor.
+
+Do not combine a verified change and a partially applied experiment in one dirty diff.
+If the current task does not authorize commits, keep them as separate patches and report
+the boundary explicitly. Keep verbose build and test output in a file; return the status,
+the failing test, and only the relevant excerpt to the coordinating agent.
+
+### Separate facts, measurements, and hypotheses
+
+Use precise evidence language in investigations, reviews, and handoffs:
+
+- **Confirmed fact** — guaranteed by a cited SDK header, project invariant, or other
+  authoritative source.
+- **Reproduced behavior** — directly observed in a named test or recording, with the
+  relevant numbers and environment.
+- **Code risk** — a path in the current code that can plausibly fail but has not been
+  reproduced.
+- **Future concern** — relevant to a later stage, not a defect in the current scope.
+
+Never report a code risk or future concern as a confirmed defect. Reserve P0/blocking
+severity for a reproduced failure, a direct violation of a confirmed invariant, or a
+path that demonstrably loses user data. State confidence and what remains unverified.
+
+Name the layer responsible for a behavior: macOS or a framework, this project's code, or
+the test harness. Do not turn a measurement from one layer into a guarantee about another.
+In particular, capture levels do not establish what Whisper will recognize; only an ASR
+evaluation does.
+
+### Design experiments before running them
+
+Before a hardware-dependent or diagnostic run, state the hypothesis, controlled
+stimulus, single variable, metric and time window, known confounders, and the result that
+would settle the question. Change one unknown per run. Use a constant signal for level,
+gain, timing, and ducking arithmetic; use human speech for meeting behavior and ASR.
+
+If a run uses the microphone, speakers, TCC prompts, or a person in the room, tell the
+user before launching it. Give one reproducible protocol: what to play or say, how long,
+when to stay silent, and what the recording will establish. Batch related phases into one
+protocol instead of surprising the user with repeated device runs.
+
+Keep three kinds of checks separate:
+
+- deterministic regression tests belong in the normal test suite;
+- hardware diagnostics and benchmarks belong in a separate diagnostic target or script;
+- one-off probes belong in a temporary directory or an explicitly disposable branch.
+
+Every hardware harness must clean up spawned processes, CoreAudio objects, recordings,
+and result bundles on success, failure, timeout, and interruption. It must be safe to run
+twice after a failed attempt.
 
 ### Missing a tool? Ask — don't route around it
 
@@ -228,9 +312,32 @@ Subagent role instructions have one source of truth under `.agents/roles/`. The 
 discovery metadata, tool or sandbox restrictions, and a pointer to the shared role. Keep
 durable role behavior in the shared file.
 
+When changing shared skills, roles, or their adapters, verify the claim for both clients
+before calling the integration complete: discovery from a fresh session, any available
+validator, and one minimal role or skill invocation through each adapter. If a client
+cannot be exercised locally, report that compatibility as unverified rather than inferred
+from matching file formats.
+
 Delegate a bounded specialist task when one of these roles matches. The main agent owns
 coordination, waits for delegated work, and integrates the result. Do not send two
-write-capable agents into overlapping files at the same time.
+write-capable agents into overlapping files at the same time, and do not ask multiple
+agents for broad audits of the same subsystem.
+
+A delegation request names:
+
+- the exact commit, base/head pair, or dirty-diff snapshot to examine;
+- one independent question and the files or responsibility the agent owns;
+- whether the task is read-only or which files it may edit;
+- the evidence required for a conclusion and the checks the agent should run;
+- the requested output, normally no more than the five highest-value findings.
+
+Every finding uses the evidence categories above and includes confidence. A specialist
+must distinguish a reproduced defect from a code risk and a future design issue. The
+coordinating agent verifies that evidence before changing priorities or recording a P0.
+
+A review verdict applies only to the named snapshot. The reviewer reports the revision
+or diff it examined; any subsequent edit to the reviewed files invalidates the verdict
+and requires a new review. Freeze those files while the final review is running.
 
 Before relying on a delegated agent's findings, confirm it actually returned them.
 Interrupting a turn also cancels the subagents that turn started, and the cancellation is

@@ -31,6 +31,14 @@ Do not rewrite code. Do not comment on style, formatting, or naming. Do not prop
 architectural rework when the current design works. Skip findings that do not change
 program behaviour.
 
+Review a fixed snapshot. Start the report with the commit, base/head pair, or dirty-diff
+identifier you examined. If the reviewed files change while the review is running, stop
+and request the new snapshot; the old verdict does not carry forward.
+
 Return findings ordered by severity: file and line, what breaks and under which scenario,
-and the smallest fix. Then a verdict: ready, ready with conditions, or blocked by a
-specific defect. If you found nothing, say so — do not pad the list with trivia.
+the evidence category and confidence defined in `AGENTS.md`, and the smallest fix. Report
+the five highest-value findings unless additional issues independently block release.
+Do not label an unreproduced possibility P0 unless it directly violates a confirmed
+real-time, ownership, or data-preservation invariant. Then give a verdict: ready, ready
+with conditions, or blocked by a specific defect. If you found nothing, say so — do not
+pad the list with trivia.

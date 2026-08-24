@@ -66,12 +66,29 @@ One measurement before the change and one after — otherwise there is no way to
 the change did. Compiling, an error-free log, and a file of plausible size are not
 evidence.
 
+Before a hardware measurement, record the hypothesis, controlled stimulus, single
+variable, metric and time window, known confounders, and the result that would settle the
+question. Use a constant tone for gain, timing, or ducking arithmetic; speech varies too
+much in level for a controlled amplitude comparison. Use human speech when the question
+is echo, conversational behavior, or intelligibility.
+
+Check the sign of every derived dB statement. dBFS values closer to zero are louder. For
+`delta = candidate_dBFS - reference_dBFS`, a positive delta means the candidate is louder
+and a negative delta means it is quieter. Print the input values and the formula beside
+labels such as "above" or "below", and add an assertion when a script converts the sign
+into prose.
+
 If a hypothesis about the cause isn't confirmed by measurement, don't move on to the next
 fix silently: a wrong hypothesis left in the code "just in case" later reads as a
 deliberate decision.
 
+Do not predict ASR behavior from peak, RMS, silence share, or correlation. Those metrics
+diagnose capture; recognition and hallucination claims require the `asr-eval` skill.
+
 ## What to report
 
-Numbers for both tracks before and after, the named cause, the fix, and the measurement
-that confirms it. Separately: what remains untested — Bluetooth headset, device switched
-mid-recording, multiple simultaneous audio sources, long recordings.
+Numbers for both tracks before and after, the formula for derived comparisons, the named
+cause, the fix, and the measurement that confirms it. Classify the conclusion as a
+confirmed fact, reproduced behavior, code risk, or future concern. Separately: what
+remains untested — Bluetooth headset, device switched mid-recording, multiple simultaneous
+audio sources, long recordings.
