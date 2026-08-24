@@ -189,6 +189,11 @@ Delegate a bounded specialist task when one of these roles matches. The main age
 coordination, waits for delegated work, and integrates the result. Do not send two
 write-capable agents into overlapping files at the same time.
 
+Before relying on a delegated agent's findings, confirm it actually returned them.
+Interrupting a turn also cancels the subagents that turn started, and the cancellation is
+silent: no completion notification arrives and the agent's report is never written. Treat
+"no result yet" as a state to check, never as evidence that work is still in progress.
+
 - `api-scout` — confirm a system API's signature, availability, and semantics before code is written.
 - `audio-capture` — implement and debug the audio capture layer.
 - `swift-reviewer` — review concurrency and real-time safety before calling a task done.
