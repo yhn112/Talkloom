@@ -8,6 +8,26 @@ Everything in this repository is written in English — documentation, comments,
 output, commit messages, UI strings. Conversation with the user happens in Russian; that
 is about the chat, and never about what goes into a file.
 
+## What to read, and when
+
+This file is the only one that has to be read in full before touching anything: it is the
+rules. The rest are looked up when the task calls for them, not read at the start of every
+session.
+
+- `PLAN.md` — product scope and the staging. Read before deciding *what* to build next, or
+  when a change seems to belong to a later stage.
+- `docs/technical-debt.md` — known design and correctness debt, prioritised. Read before
+  starting cleanup work, and add to it when leaving something unfinished.
+- `docs/system-audio-capture.md` — process taps and aggregate devices, every claim cited to
+  an SDK header and line. Read before touching the system-audio path.
+- `.agents/skills/*/SKILL.md` — how to build, record, diagnose a recording, measure ASR.
+  Read the one that matches the task at hand.
+- `.agents/roles/*.md` — what each delegated subagent is responsible for.
+
+Session notes, scratch logs and transcripts of previous work are not project documentation
+and do not belong in the repository. If something learned that way is durable, it belongs
+in one of the files above, in the same change.
+
 ## Environment
 
 - macOS 26.6.2, arm64, Swift 6.
