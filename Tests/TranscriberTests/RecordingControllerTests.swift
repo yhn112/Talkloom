@@ -1,10 +1,12 @@
+import Foundation
+import Testing
 import TranscriberCore
-import XCTest
 
 @testable import Transcriber
 
+@Suite("Recording controller")
 @MainActor
-final class RecordingControllerTests: XCTestCase {
+struct RecordingControllerTests {
     private actor FakeMicrophone: MicrophoneCapturing {
         let shouldFailStart: Bool
         private(set) var beginCount = 0
@@ -104,30 +106,38 @@ final class RecordingControllerTests: XCTestCase {
         )
     }
 
-    func testMicrophoneStartFailureRollsBackSystemCapture() async throws {
+    /// The manifest as it was actually written to disk — the version that outlives the app.
+    private func manifest(in session: RecordingSession) throws -> RecordingManifest {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(
+            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        return try decoder.decode(RecordingManifest.self, from: data)
+    }
+
+    @Test("a microphone start failure rolls back system capture")
+    func microphoneStartFailureRollsBackSystemCapture() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let microphone = FakeMicrophone(shouldFailStart: true)
         let system = FakeSystemAudio()
         let controller = RecordingController(
             permissions: PermissionManager(microphone: .granted),
             sessionRoot: root,
-            microphone: microphone,
+            microphone: FakeMicrophone(shouldFailStart: true),
             systemAudio: system
         )
 
         await controller.start()
 
-        let systemBeginCount = await system.beginCount
-        let systemEndCount = await system.endCount
-        XCTAssertNotNil(controller.errorMessage)
-        XCTAssertEqual(systemBeginCount, 1)
-        XCTAssertEqual(systemEndCount, 1)
-        XCTAssertNil(controller.currentSession)
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
+        #expect(controller.errorMessage != nil)
+        #expect(await system.beginCount == 1)
+        #expect(await system.endCount == 1)
+        #expect(controller.currentSession == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == [])
     }
 
-    func testSecondStartDuringStartupIsIgnored() async throws {
+    @Test("a second start during startup is ignored")
+    func secondStartDuringStartupIsIgnored() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -144,15 +154,14 @@ final class RecordingControllerTests: XCTestCase {
         await controller.start()
         await firstStart.value
 
-        let systemBeginCount = await system.beginCount
-        let microphoneBeginCount = await microphone.beginCount
-        XCTAssertEqual(systemBeginCount, 1)
-        XCTAssertEqual(microphoneBeginCount, 1)
-        XCTAssertTrue(controller.isRecording)
+        #expect(await system.beginCount == 1)
+        #expect(await microphone.beginCount == 1)
+        #expect(controller.isRecording)
         await controller.stop()
     }
 
-    func testRuntimeFailureStopsBothTracksAndFailsTheSession() async throws {
+    @Test("a runtime failure stops both tracks and fails the session")
+    func runtimeFailureStopsBothTracksAndFailsTheSession() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -164,27 +173,21 @@ final class RecordingControllerTests: XCTestCase {
             systemAudio: system
         )
         await controller.start()
-        let session = try XCTUnwrap(controller.currentSession)
+        let session = try #require(controller.currentSession)
 
         await system.fail("device disappeared")
         for _ in 0..<20 where controller.errorMessage == nil {
             try await Task.sleep(for: .milliseconds(10))
         }
 
-        let microphoneEndCount = await microphone.endCount
-        let systemEndCount = await system.endCount
-        XCTAssertEqual(controller.errorMessage, "System audio capture stopped: device disappeared")
-        XCTAssertEqual(microphoneEndCount, 1)
-        XCTAssertEqual(systemEndCount, 1)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(
-            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
-        let manifest = try decoder.decode(RecordingManifest.self, from: data)
-        XCTAssertEqual(manifest.failure, controller.errorMessage)
+        #expect(controller.errorMessage == "System audio capture stopped: device disappeared")
+        #expect(await microphone.endCount == 1)
+        #expect(await system.endCount == 1)
+        #expect(try manifest(in: session).failure == controller.errorMessage)
     }
 
-    func testStartDuringStopIsIgnored() async throws {
+    @Test("a start during stop is ignored")
+    func startDuringStopIsIgnored() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -202,21 +205,19 @@ final class RecordingControllerTests: XCTestCase {
         await controller.start()
         await stop.value
 
-        let microphoneBeginCount = await microphone.beginCount
-        let systemBeginCount = await system.beginCount
-        XCTAssertEqual(microphoneBeginCount, 1)
-        XCTAssertEqual(systemBeginCount, 1)
-        XCTAssertFalse(controller.isRecording)
-        XCTAssertNil(controller.errorMessage)
+        #expect(await microphone.beginCount == 1)
+        #expect(await system.beginCount == 1)
+        #expect(!controller.isRecording)
+        #expect(controller.errorMessage == nil)
     }
 
-    func testTrackWriteFailureFailsSessionAndPersistsPartialTrack() async throws {
+    @Test("a track write failure fails the session and persists the partial track")
+    func trackWriteFailureFailsSessionAndPersistsPartialTrack() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let expectedURL = root.appending(path: "partial-system.wav")
         let system = FakeSystemAudio(
             completion: systemCompletion(
-                at: expectedURL,
+                at: root.appending(path: "partial-system.wav"),
                 frameCount: 24_000,
                 peakAmplitude: 0.5,
                 failure: .writeFailed(label: "system", reason: "disk full")
@@ -229,26 +230,23 @@ final class RecordingControllerTests: XCTestCase {
             systemAudio: system
         )
         await controller.start()
-        let session = try XCTUnwrap(controller.currentSession)
+        let session = try #require(controller.currentSession)
 
         await controller.stop()
 
-        XCTAssertEqual(controller.errorMessage, "The system track could not write audio: disk full")
-        XCTAssertEqual(controller.lastSystemTrack?.frameCount, 24_000)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(
-            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
-        let manifest = try decoder.decode(RecordingManifest.self, from: data)
-        XCTAssertEqual(manifest.failure, controller.errorMessage)
-        XCTAssertEqual(manifest.tracks.first?.failure, controller.errorMessage)
+        #expect(controller.errorMessage == "The system track could not write audio: disk full")
+        #expect(controller.lastSystemTrack?.frameCount == 24_000)
+        let written = try manifest(in: session)
+        #expect(written.failure == controller.errorMessage)
+        #expect(written.tracks.first?.failure == controller.errorMessage)
     }
 
     /// When the tap does not come up, the session continues on the microphone alone with
     /// echo cancellation off — which means that recording holds both sides of the call. The
     /// menu bar says so while the app is open; the manifest has to say so for good, because
     /// it is what the transcription step will read months later.
-    func testAFallbackToTheMicrophoneAloneIsRecordedInTheManifest() async throws {
+    @Test("a fallback to the microphone alone is recorded in the manifest")
+    func fallbackToTheMicrophoneAloneIsRecordedInTheManifest() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -260,24 +258,22 @@ final class RecordingControllerTests: XCTestCase {
         )
 
         await controller.start()
-        let session = try XCTUnwrap(controller.currentSession)
+        let session = try #require(controller.currentSession)
         await controller.stop()
 
-        let voiceProcessing = await microphone.lastVoiceProcessing
-        XCTAssertEqual(voiceProcessing, false, "the remote side is only on the mic track now")
-        XCTAssertNil(controller.errorMessage, "a degraded recording is not a failed one")
+        #expect(
+            await microphone.lastVoiceProcessing == false,
+            "the remote side is only on the mic track now")
+        #expect(controller.errorMessage == nil, "a degraded recording is not a failed one")
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(
-            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
-        let manifest = try decoder.decode(RecordingManifest.self, from: data)
-        XCTAssertEqual(manifest.status, .completed)
-        XCTAssertEqual(manifest.warning, controller.warning)
-        XCTAssertNotNil(manifest.warning)
+        let written = try manifest(in: session)
+        #expect(written.status == .completed)
+        #expect(written.warning == controller.warning)
+        #expect(written.warning != nil)
     }
 
-    func testASessionThatUsedBothPathsCarriesNoWarning() async throws {
+    @Test("a session that used both paths carries no warning")
+    func aSessionThatUsedBothPathsCarriesNoWarning() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -291,62 +287,57 @@ final class RecordingControllerTests: XCTestCase {
         )
 
         await controller.start()
-        let session = try XCTUnwrap(controller.currentSession)
+        let session = try #require(controller.currentSession)
         await controller.stop()
 
-        let voiceProcessing = await microphone.lastVoiceProcessing
-        XCTAssertEqual(voiceProcessing, true)
+        #expect(await microphone.lastVoiceProcessing == true)
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let data = try Data(
-            contentsOf: session.directory.appending(path: RecordingManifest.fileName))
-        let manifest = try decoder.decode(RecordingManifest.self, from: data)
-        XCTAssertNil(manifest.warning)
-        XCTAssertEqual(manifest.tracks.first?.content, .remote)
+        let written = try manifest(in: session)
+        #expect(written.warning == nil)
+        #expect(written.tracks.first?.content == .remote)
     }
 
-    func testSystemAudioIsMarkedWorkingOnlyAfterRecordingSignal() async throws {
+    @Test("system audio counts as working only once a signal was recorded")
+    func systemAudioIsMarkedWorkingOnlyAfterRecordingSignal() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let permissions = PermissionManager(microphone: .granted, systemAudio: .granted)
-        let system = FakeSystemAudio(
-            completion: systemCompletion(at: root.appending(path: "system.wav"))
-        )
         let controller = RecordingController(
             permissions: permissions,
             sessionRoot: root,
             microphone: FakeMicrophone(),
-            systemAudio: system
+            systemAudio: FakeSystemAudio(
+                completion: systemCompletion(at: root.appending(path: "system.wav"))
+            )
         )
 
         await controller.start()
-        XCTAssertEqual(permissions.systemAudio, .notDetermined)
+        #expect(permissions.systemAudio == .notDetermined)
 
         await controller.stop()
-        XCTAssertEqual(permissions.systemAudio, .granted)
+        #expect(permissions.systemAudio == .granted)
     }
 
-    func testSilentSystemAudioDoesNotPretendToProvePermission() async throws {
+    @Test("silent system audio does not pretend to prove permission")
+    func silentSystemAudioDoesNotPretendToProvePermission() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let permissions = PermissionManager(microphone: .granted)
-        let system = FakeSystemAudio(
-            completion: systemCompletion(
-                at: root.appending(path: "system.wav"),
-                peakAmplitude: 0
-            )
-        )
         let controller = RecordingController(
             permissions: permissions,
             sessionRoot: root,
             microphone: FakeMicrophone(),
-            systemAudio: system
+            systemAudio: FakeSystemAudio(
+                completion: systemCompletion(
+                    at: root.appending(path: "system.wav"),
+                    peakAmplitude: 0
+                )
+            )
         )
 
         await controller.start()
         await controller.stop()
 
-        XCTAssertEqual(permissions.systemAudio, .notDetermined)
+        #expect(permissions.systemAudio == .notDetermined)
     }
 }
