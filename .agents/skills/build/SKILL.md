@@ -153,6 +153,12 @@ has to come from the scheme itself.
 
 ## When it doesn't work
 
+Start with `scripts/doctor.sh` when the failure smells like the environment rather than
+the code. It prints the toolchain, the selected developer directory, the SDK, the signing
+identity and the Python tooling, and exits non-zero naming where anything missing comes
+from. That is faster than inferring the cause from a build log, and it catches the first
+two entries below outright.
+
 - **`xcodebuild` missing, or complaining about the license** — only Command Line Tools are
   selected. Point at Xcode with
   `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`, then

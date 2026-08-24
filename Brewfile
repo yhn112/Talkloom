@@ -1,0 +1,17 @@
+# The command-line tools this project expects, so a fresh machine is one `brew bundle`
+# away. Xcode itself is not here: it comes from the App Store and is a decision, not a
+# dependency (AGENTS.md, "Missing a tool? Ask — don't route around it").
+#
+# swift-format is deliberately absent too — it ships inside Xcode and is reached through
+# `xcrun`, so a Homebrew copy would only introduce a second version to disagree with.
+
+# Generates Transcriber.xcodeproj from project.yml.
+brew "xcodegen"
+# Collapses xcodebuild output to the errors. Measured at 98 kB against 127 bytes for a
+# green run, which is the difference between an agent reading the failure and not.
+brew "xcsift"
+# The Python tooling for ASR evaluation and recording analysis lives in a uv-managed .venv.
+brew "uv"
+# Evaluation tooling only. The app itself uses afconvert, which ships with macOS, so that
+# it acquires no Homebrew dependency it cannot satisfy on someone else's machine.
+brew "ffmpeg"

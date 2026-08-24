@@ -25,7 +25,11 @@
       "Bash(swift test:*)",
       "Bash(xcsift:*)",
       "Bash(scripts/track_compare.py:*)",
-      "Bash(scripts/sanitize.sh:*)"
+      "Bash(scripts/sanitize.sh:*)",
+      "Bash(scripts/doctor.sh:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv lock:*)",
+      "Bash(brew bundle:*)"
     ],
     "deny": []
   }

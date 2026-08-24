@@ -1,0 +1,26 @@
+# The Python side of this project is tooling, not a shipped component: ASR evaluation and
+# recording analysis, run from scripts/ against a uv-managed .venv. It exists here so that
+# .venv can be rebuilt — it is not in git, and before this file nothing recorded what it
+# had to contain.
+#
+#   uv sync        # create or update .venv from uv.lock
+#
+# The app ships nothing from here. Whisper runs in Swift; see PLAN.md.
+
+[project]
+name = "transcriber-tooling"
+version = "0.1.0"
+description = "ASR evaluation and recording analysis for Transcriber"
+# 3.13 is what the toolchain on this machine provides; nothing here needs anything newer.
+requires-python = ">=3.13"
+dependencies = [
+    # scripts/audio_check.py, scripts/track_compare.py — peak, RMS, silence share, DC offset.
+    "numpy",
+    "soundfile",
+    # scripts/wer.py — word and character error rate with alignment.
+    "jiwer",
+]
+
+[tool.uv]
+# Tooling, not a distributable package: there is nothing to build or install from here.
+package = false
