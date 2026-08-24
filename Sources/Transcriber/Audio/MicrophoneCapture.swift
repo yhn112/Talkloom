@@ -47,10 +47,8 @@ actor MicrophoneCapture {
 
     private let engine = AVAudioEngine()
     private var recorder: TrackRecorder?
-    private var sampleRate: Double = 0
     private var configurationObserver: (any NSObjectProtocol)?
-
-    var isRunning: Bool { recorder != nil }
+    private var runtimeFailureHandler: (@Sendable (String) -> Void)?
 
     /// Starts capture into `url` and returns the format the device actually delivered.
     ///
@@ -137,8 +135,6 @@ actor MicrophoneCapture {
 
         await recorder.start()
         self.recorder = recorder
-        self.sampleRate = format.sampleRate
-        observeConfigurationChanges()
 
         AppLog.capture.notice(
             "microphone capture started at \(format.sampleRate, format: .fixed(precision: 0), privacy: .public) Hz, \(format.channelCount, privacy: .public) channel(s), voice processing \(input.isVoiceProcessingEnabled ? "on" : "off", privacy: .public); output node expects \(self.engine.outputNode.inputFormat(forBus: 0).sampleRate, format: .fixed(precision: 0), privacy: .public) Hz, \(self.engine.outputNode.inputFormat(forBus: 0).channelCount, privacy: .public) channel(s)"
@@ -146,10 +142,18 @@ actor MicrophoneCapture {
         return format
     }
 
+    /// Arms device-change monitoring once the controller is ready to handle a failure.
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
+        guard recorder != nil else { return }
+        runtimeFailureHandler = handler
+        observeConfigurationChanges()
+    }
+
     /// Stops capture and closes the file.
     func stop() async -> TrackRecorder.Summary? {
         guard let recorder else { return nil }
         self.recorder = nil
+        runtimeFailureHandler = nil
 
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
@@ -196,29 +200,21 @@ actor MicrophoneCapture {
         }
     }
 
-    private func handleConfigurationChange() async {
+    private func handleConfigurationChange() {
         guard recorder != nil else { return }
-        let format = engine.inputNode.outputFormat(forBus: 0)
 
-        // The master is written at one fixed rate, so a device that comes back at a
-        // different one cannot be appended to the same file. Stop rather than write
-        // audio that plays at the wrong speed from that point on.
-        guard format.sampleRate == sampleRate else {
-            AppLog.capture.error(
-                "audio configuration changed and the input rate moved from \(self.sampleRate, format: .fixed(precision: 0), privacy: .public) Hz to \(format.sampleRate, format: .fixed(precision: 0), privacy: .public) Hz; ending the microphone track here"
-            )
-            _ = await stop()
-            return
-        }
+        // Even when the sample rate is unchanged, restarting would remove the stopped
+        // interval from this WAV and shift its remaining timeline relative to system audio.
+        // Until manifests can represent spans, stop both tracks instead.
+        reportRuntimeFailure(
+            "The microphone audio configuration changed; recording stopped to preserve track alignment."
+        )
+    }
 
-        AppLog.capture.notice("audio configuration changed; restarting the microphone engine")
-        do {
-            try engine.start()
-        } catch {
-            AppLog.capture.error(
-                "could not restart the microphone after a configuration change: \(error.localizedDescription, privacy: .public)"
-            )
-            _ = await stop()
-        }
+    private func reportRuntimeFailure(_ message: String) {
+        AppLog.capture.error("\(message, privacy: .public)")
+        let handler = runtimeFailureHandler
+        runtimeFailureHandler = nil
+        handler?(message)
     }
 }

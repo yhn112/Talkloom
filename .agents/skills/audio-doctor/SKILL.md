@@ -33,14 +33,14 @@ means the bundle signature changed.
 
 **Only the system track is empty.** The process tap was created but never attached to the
 aggregate device, or it is attached to a process that isn't producing audio. Confirm audio
-was actually playing during the recording. If the output device changed mid-recording
-(headphones plugged in), the aggregate collapsed and the tap must be rebuilt on the
-default-device-changed notification.
+was actually playing during the recording. A device change can collapse the aggregate;
+until manifests represent discontinuities, the app must stop the whole session visibly
+rather than append a rebuilt tap to the same WAV.
 
 **Only the microphone track is empty.** Typically Voice Processing IO delivered a format
-other than the expected one — a multi-channel stream instead of mono has been observed —
-and the converter emitted silence without reporting an error. Log the actual
-`AVAudioFormat` at the converter's input and compare it with what the code expects.
+or buffer layout other than the one the callback path accepts — a multi-channel stream
+instead of mono has been observed. Log the actual `AVAudioFormat` and buffer layout and
+compare them with the validated native-format copy path. Capture does not resample live.
 
 **The remote party is too quiet.** Voice Processing IO ducks other audio automatically.
 Disable it via `voiceProcessingOtherAudioDuckingConfiguration`.

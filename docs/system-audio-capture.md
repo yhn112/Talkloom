@@ -54,9 +54,9 @@ The tap object answers three properties (`AudioHardware.h:2025`–`:2027`):
 | `kAudioTapPropertyDescription` | `'tdsc'` |
 | `kAudioTapPropertyFormat` | `'tfmt'` |
 
-Query `kAudioTapPropertyFormat` **before** starting the device and configure the converter
-from what it actually reports. Assuming a format here is the mistake that produces a valid
-file full of silence.
+Query `kAudioTapPropertyFormat` **before** starting the device and configure the writer from
+what it actually reports. Assuming a format here is the mistake that produces a valid file
+full of silence.
 
 ## The aggregate device
 
@@ -105,13 +105,12 @@ and return. The queue does not make it safe to allocate or lock.
 The dispatch queue and the block are both retained until a matching
 `AudioDeviceDestroyIOProcID`.
 
-## Rebuilding after a device change
+## Device changes are detected by their effect
 
-Listen for `kAudioHardwarePropertyDefaultOutputDevice` (`'dOut'`, `AudioHardware.h:610`) on
-the system object, with scope `kAudioObjectPropertyScopeGlobal` (`'glob'`,
-`AudioHardwareBase.h:203`) and element `kAudioObjectPropertyElementMain` (`0`,
-`AudioHardwareBase.h:207`). Plugging in headphones changes the default output and tears
-down the aggregate, so the tap has to be rebuilt in response.
+Changing the default output device can tear down the aggregate, but a tap-only aggregate
+does not necessarily die whenever the default changes. Listening to
+`kAudioHardwarePropertyDefaultOutputDevice` therefore has both false positives and false
+negatives. The implementation watches whether the tap continues delivering frames instead.
 
 ## The aggregate holds the tap and nothing else
 
@@ -149,7 +148,9 @@ changes, whether or not the tap was affected.
 
 Watching the tap's own output covers every cause and costs nothing. With auto-start off the
 tap delivers frames continuously, silence included, so a stream that produces nothing for a
-couple of seconds has stopped. That is the signal this project rebuilds on.
+couple of seconds has stopped. That is the signal this project reports to the recording
+controller. The controller finalizes both tracks and shows a failure; it does not append a
+replacement stream to the same WAV because that would hide the gap from the timeline.
 
 ## Call sequence
 

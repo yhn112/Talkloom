@@ -68,6 +68,7 @@ struct MenuBarView: View {
                 Task { await controller.toggle() }
             }
             .keyboardShortcut("r")
+            .disabled(controller.isTransitioning)
 
             if let session = controller.currentSession {
                 Button("Reveal recording folder") {
@@ -85,6 +86,7 @@ struct MenuBarView: View {
                 }
             }
             .keyboardShortcut("q")
+            .disabled(controller.isTransitioning)
         }
     }
 

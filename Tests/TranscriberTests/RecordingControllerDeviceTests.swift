@@ -10,23 +10,18 @@ import XCTest
 /// session ends up describing itself on disk.
 @MainActor
 final class RecordingControllerDeviceTests: XCTestCase {
-    private var root = URL(fileURLWithPath: "/dev/null")
-
     override func setUpWithError() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["TRANSCRIBER_DEVICE_TESTS"] == "1",
             "set TRANSCRIBER_DEVICE_TESTS=1 to run the tests that use real audio devices"
         )
-        root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appending(path: "ControllerDeviceTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    }
-
-    override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: root)
     }
 
     func testARecordingProducesTwoTracksAndAManifestDescribingThem() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "ControllerDeviceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
         let controller = RecordingController(sessionRoot: root)
 
         await controller.start()

@@ -8,9 +8,7 @@ import Foundation
 /// heavyweight permission for something that only needs audio. The call sequence and the
 /// header citations behind every constant used here are in `docs/system-audio-capture.md`.
 ///
-/// A tap produces nothing on its own: it has to be wrapped in a private aggregate device,
-/// whose time source is the current default output device. That dependency is why plugging
-/// in headphones tears the whole thing down and it has to be rebuilt.
+/// A tap produces nothing on its own: it has to be wrapped in a private aggregate device.
 actor SystemAudioCapture {
     enum Failure: Error, LocalizedError {
         case tapCreationFailed(OSStatus)
@@ -63,8 +61,7 @@ actor SystemAudioCapture {
     private var watchdogTask: Task<Void, Never>?
     private var lastObservedSampleCount = 0
     private var stalledSeconds = 0
-
-    var isRunning: Bool { recorder != nil }
+    private var runtimeFailureHandler: (@Sendable (String) -> Void)?
 
     /// Last resort for the tap and its aggregate device.
     ///
@@ -120,7 +117,6 @@ actor SystemAudioCapture {
         self.recorder = recorder
         lastObservedSampleCount = 0
         stalledSeconds = 0
-        startWatchdog()
 
         let format = probe.format
         AppLog.capture.notice(
@@ -129,10 +125,18 @@ actor SystemAudioCapture {
         return sampleRate
     }
 
+    /// Arms the watchdog once the controller is ready to stop the complete session.
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
+        guard recorder != nil else { return }
+        runtimeFailureHandler = handler
+        startWatchdog()
+    }
+
     /// Stops capture and closes the file.
     func stop() async -> TrackRecorder.Summary? {
         guard let recorder else { return nil }
         self.recorder = nil
+        runtimeFailureHandler = nil
 
         watchdogTask?.cancel()
         watchdogTask = nil
@@ -314,41 +318,17 @@ actor SystemAudioCapture {
         guard stalledSeconds >= Self.stallTolerance else { return }
         stalledSeconds = 0
 
-        AppLog.capture.error(
-            "the system audio tap has delivered nothing for \(Self.stallTolerance, privacy: .public) s; rebuilding it"
+        reportRuntimeFailure(
+            "The system audio tap stopped delivering samples for \(Self.stallTolerance) seconds."
         )
-        await rebuild(feeding: recorder)
     }
 
-    private func rebuild(feeding recorder: TrackRecorder) async {
-        guard let previous = tap else { return }
-        destroy(previous)
-        tap = nil
-
-        do {
-            let rebuilt = try createTap()
-            // The master is one file at one rate. A tap that comes back at a different rate
-            // cannot be appended to it, so the track ends here rather than continuing at the
-            // wrong speed.
-            guard rebuilt.format.mSampleRate == previous.format.mSampleRate else {
-                AppLog.capture.error(
-                    "the rebuilt tap runs at \(rebuilt.format.mSampleRate, format: .fixed(precision: 0), privacy: .public) Hz instead of \(previous.format.mSampleRate, format: .fixed(precision: 0), privacy: .public) Hz; ending the system audio track here"
-                )
-                destroy(rebuilt)
-                _ = await stop()
-                return
-            }
-
-            var running = rebuilt
-            try attachAndStart(&running, feeding: recorder.input)
-            tap = running
-            lastObservedSampleCount = recorder.input.ring.totalSampleCount
-            AppLog.capture.notice("the system audio tap was rebuilt and is running again")
-        } catch {
-            AppLog.capture.error(
-                "could not rebuild the system audio tap: \(error.localizedDescription, privacy: .public)"
-            )
-            _ = await stop()
-        }
+    private func reportRuntimeFailure(_ message: String) {
+        AppLog.capture.error("\(message, privacy: .public)")
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        let handler = runtimeFailureHandler
+        runtimeFailureHandler = nil
+        handler?(message)
     }
 }

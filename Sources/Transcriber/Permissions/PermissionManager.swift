@@ -27,8 +27,13 @@ final class PermissionManager {
     /// `notDetermined` until the first recording attempt reports back.
     private(set) var systemAudio: Status = .notDetermined
 
-    init() {
-        refreshMicrophone()
+    init(microphone: Status? = nil, systemAudio: Status = .notDetermined) {
+        self.systemAudio = systemAudio
+        if let microphone {
+            self.microphone = microphone
+        } else {
+            refreshMicrophone()
+        }
     }
 
     func refreshMicrophone() {

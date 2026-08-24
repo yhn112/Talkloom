@@ -1,49 +1,90 @@
 import Foundation
 import Observation
 
-/// Drives a recording from the UI's point of view.
+protocol MicrophoneCapturing: Sendable {
+    func begin(writingTo url: URL, voiceProcessing: Bool) async throws
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
+    func end() async -> TrackRecorder.Summary?
+}
+
+protocol SystemAudioCapturing: Sendable {
+    func begin(writingTo url: URL) async throws
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
+    func end() async -> TrackRecorder.Summary?
+}
+
+extension MicrophoneCapture: MicrophoneCapturing {
+    func begin(writingTo url: URL, voiceProcessing: Bool) async throws {
+        _ = try await start(writingTo: url, voiceProcessing: voiceProcessing)
+    }
+
+    func end() async -> TrackRecorder.Summary? { await stop() }
+}
+
+extension SystemAudioCapture: SystemAudioCapturing {
+    func begin(writingTo url: URL) async throws {
+        _ = try await start(writingTo: url)
+    }
+
+    func end() async -> TrackRecorder.Summary? { await stop() }
+}
+
+/// Owns the complete lifecycle of one recording. UI state and cleanup eligibility are the
+/// same state machine, so a failed start cannot leave a hidden capture path behind.
 @MainActor
 @Observable
 final class RecordingController {
     enum State: Equatable {
         case idle
+        case starting(RecordingSession?)
         case recording(RecordingSession)
+        case stopping(RecordingSession)
         case failed(String)
     }
 
     private(set) var state: State = .idle
-
-    /// What the last recording produced. Kept on screen after stopping because the peak
-    /// amplitude is the only thing that distinguishes a real recording from a valid file
-    /// full of silence, and finding that out a day later is too late.
     private(set) var lastMicrophoneTrack: TrackRecorder.Summary?
     private(set) var lastSystemTrack: TrackRecorder.Summary?
-
-    /// Something went wrong that did not stop the recording — in practice, system audio
-    /// failing while the microphone kept going.
     private(set) var warning: String?
 
     let permissions: PermissionManager
-    private let microphone = MicrophoneCapture()
-    private let systemAudio = SystemAudioCapture()
-
-    /// Where sessions are created. Overridden only by tests, which must not scatter
-    /// recordings through the user's Application Support folder.
+    private let microphone: any MicrophoneCapturing
+    private let systemAudio: any SystemAudioCapturing
     private let sessionRoot: URL?
 
-    init(permissions: PermissionManager = PermissionManager(), sessionRoot: URL? = nil) {
+    init(
+        permissions: PermissionManager = PermissionManager(),
+        sessionRoot: URL? = nil,
+        microphone: any MicrophoneCapturing = MicrophoneCapture(),
+        systemAudio: any SystemAudioCapturing = SystemAudioCapture()
+    ) {
         self.permissions = permissions
         self.sessionRoot = sessionRoot
+        self.microphone = microphone
+        self.systemAudio = systemAudio
     }
 
     var isRecording: Bool {
-        if case .recording = state { return true }
-        return false
+        switch state {
+        case .starting(let session): session != nil
+        case .recording, .stopping: true
+        default: false
+        }
+    }
+
+    var isTransitioning: Bool {
+        switch state {
+        case .starting, .stopping: true
+        default: false
+        }
     }
 
     var currentSession: RecordingSession? {
-        if case .recording(let session) = state { return session }
-        return nil
+        switch state {
+        case .starting(let session): session
+        case .recording(let session), .stopping(let session): session
+        default: nil
+        }
     }
 
     var errorMessage: String? {
@@ -52,39 +93,40 @@ final class RecordingController {
     }
 
     func toggle() async {
-        if isRecording {
-            await stop()
-        } else {
+        switch state {
+        case .idle, .failed:
             await start()
+        case .recording:
+            await stop()
+        case .starting, .stopping:
+            return
         }
     }
 
     func start() async {
+        guard state == .idle || isFailed else { return }
+        state = .starting(nil)
+
         await permissions.requestMicrophone()
         guard permissions.microphone.isUsable else {
-            let message = "Microphone access is required. Grant it in System Settings › Privacy & Security › Microphone."
-            AppLog.capture.error("refusing to start: microphone permission not granted")
-            state = .failed(message)
+            fail("Microphone access is required. Grant it in System Settings › Privacy & Security › Microphone.")
             return
         }
 
+        var session: RecordingSession?
+        var systemStarted = false
         do {
-            let session = try RecordingSession.create(root: sessionRoot)
+            let created = try RecordingSession.create(root: sessionRoot)
+            session = created
+            state = .starting(created)
             lastMicrophoneTrack = nil
             lastSystemTrack = nil
             warning = nil
 
-            // System audio starts first, and whether it worked decides how the microphone
-            // is configured. Echo cancellation removes the other participants from the
-            // microphone track; that is only safe because the tap is recording them
-            // separately. With no system track, cancelling them would erase them from the
-            // only recording there is — so the microphone keeps the speaker bleed instead,
-            // echo and all. A doubled transcript is recoverable; a missing one is not.
-            var systemAudioIsRecording = false
             do {
-                try await systemAudio.start(writingTo: session.systemTrackURL)
+                try await systemAudio.begin(writingTo: created.systemTrackURL)
                 permissions.setSystemAudio(.granted)
-                systemAudioIsRecording = true
+                systemStarted = true
             } catch {
                 permissions.setSystemAudio(.denied)
                 warning =
@@ -94,37 +136,80 @@ final class RecordingController {
                 )
             }
 
-            try await microphone.start(
-                writingTo: session.microphoneTrackURL,
-                voiceProcessing: systemAudioIsRecording
+            try await microphone.begin(
+                writingTo: created.microphoneTrackURL,
+                voiceProcessing: systemStarted
             )
 
-            state = .recording(session)
-            AppLog.capture.info("recording started in \(session.directory.path, privacy: .public)")
+            state = .recording(created)
+            await armRuntimeFailureMonitoring()
+            guard state == .recording(created) else { return }
+            AppLog.capture.info("recording started in \(created.directory.path, privacy: .public)")
         } catch {
-            AppLog.capture.error("could not start recording: \(error.localizedDescription, privacy: .public)")
-            state = .failed(error.localizedDescription)
+            // End both paths even when only one reached its running state. The capture
+            // contracts make ending a path that never started a no-op.
+            _ = await microphone.end()
+            if systemStarted { _ = await systemAudio.end() }
+            if let session { try? FileManager.default.removeItem(at: session.directory) }
+            fail(error.localizedDescription)
         }
     }
 
     func stop() async {
-        guard let session = currentSession else { return }
-        state = .idle
+        guard case .recording(let session) = state else { return }
+        await finish(session: session, failure: nil)
+    }
 
-        lastMicrophoneTrack = await microphone.stop()
-        lastSystemTrack = await systemAudio.stop()
+    private var isFailed: Bool {
+        if case .failed = state { return true }
+        return false
+    }
+
+    private func armRuntimeFailureMonitoring() async {
+        await microphone.monitorRuntimeFailures { [weak self] message in
+            Task { @MainActor [weak self] in
+                await self?.handleRuntimeFailure("Microphone capture stopped: \(message)")
+            }
+        }
+        await systemAudio.monitorRuntimeFailures { [weak self] message in
+            Task { @MainActor [weak self] in
+                await self?.handleRuntimeFailure("System audio capture stopped: \(message)")
+            }
+        }
+    }
+
+    private func handleRuntimeFailure(_ message: String) async {
+        guard case .recording(let session) = state else { return }
+        await finish(session: session, failure: message)
+    }
+
+    private func finish(session: RecordingSession, failure: String?) async {
+        state = .stopping(session)
+
+        async let microphoneTrack = microphone.end()
+        async let systemTrack = systemAudio.end()
+        let tracks = await (microphoneTrack, systemTrack)
+        lastMicrophoneTrack = tracks.0
+        lastSystemTrack = tracks.1
 
         AppLog.capture.info(
             "recording stopped after \(Date().timeIntervalSince(session.startedAt), format: .fixed(precision: 1), privacy: .public) s"
         )
         logTrackOffset()
         writeManifest(for: session)
+
+        if let failure {
+            fail(failure)
+        } else {
+            state = .idle
+        }
     }
 
-    /// How far apart the two tracks actually started.
-    ///
-    /// The streams do not begin together — the tap waits for a process to make a sound —
-    /// so segments have to be merged on this offset rather than on a shared zero.
+    private func fail(_ message: String) {
+        AppLog.capture.error("recording failed: \(message, privacy: .public)")
+        state = .failed(message)
+    }
+
     var trackOffset: TimeInterval? {
         guard let microphoneStart = lastMicrophoneTrack?.firstSampleHostTime,
             let systemStart = lastSystemTrack?.firstSampleHostTime

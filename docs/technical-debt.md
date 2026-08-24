@@ -9,12 +9,11 @@ found during review of `feat/audio-capture` at `c2e34ab` plus its working-tree c
 
 ### P0 — make capture lifecycle explicit
 
-- Make recording startup transactional. If system capture starts and microphone capture
-  fails, stop and finalize the system path before publishing a failure.
-- Add explicit `starting` and `stopping` states, or an equivalent operation token. Reject
-  repeated Start/Stop actions while a transition is in progress.
-- Give both capture actors a runtime event channel. A path must not stop itself after a
-  device change while the controller and UI continue to report an active recording.
+Transactional startup, explicit `starting`/`stopping` states, and capture-to-controller
+runtime failure events are implemented on the audio-capture branch. A startup failure rolls
+back both paths, and a runtime failure finalizes both tracks before the UI reports failure.
+The remaining lifecycle work is:
+
 - Do not infer the system-audio TCC state from successful tap creation. A tap may start and
   still deliver silence; enabling microphone AEC in that state can remove the remote side
   from the only usable track.
@@ -63,13 +62,7 @@ found during review of `feat/audio-capture` at `c2e34ab` plus its working-tree c
 
 ### Reduce self-healing until it can be correct
 
-`SystemAudioCapture` currently detects a two-second stall, destroys the tap and aggregate,
-creates replacements, and appends the new stream to the same WAV. `MicrophoneCapture`
-similarly attempts to restart its engine after a configuration change. This recovery code
-adds resource-ownership paths while producing a file whose timeline is wrong and whose
-controller still looks healthy.
-
-For the MVP, the smaller and safer policy is:
+The MVP now applies the smaller policy:
 
 1. detect a stopped path;
 2. report it to the controller;
@@ -81,9 +74,9 @@ tests.
 
 ### Give CoreAudio resources one owner
 
-Tap, aggregate-device and IOProc cleanup is repeated in normal stop, `deinit`, initial
-rollback and rebuild rollback. Some error paths already omit part of the cleanup, and all
-teardown status values are discarded.
+Tap, aggregate-device and IOProc cleanup is repeated in normal stop, `deinit`, and initial
+rollback. Some error paths already omit part of the cleanup, and all teardown status values
+are discarded.
 
 Use one small resource owner that acquires IDs step by step, destroys acquired resources in
 reverse order, logs teardown failures, and remains responsible until cleanup succeeds or
