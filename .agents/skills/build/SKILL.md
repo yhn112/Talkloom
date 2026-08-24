@@ -169,8 +169,8 @@ two entries below outright.
   creation looks like; check the logs. `LSUIElement` hides the Dock icon, so a crash
   presents as "nothing happened".
 - **App stopped asking for permission and records silence** — the signature or bundle id
-  changed, so TCC considers it a different app. Reset and grant again:
-  `tccutil reset Microphone me.diskin.Transcriber`, and the same for `AudioCapture`.
+  changed, so TCC considers it a different app. The skill `audio-doctor` has the reset and
+  the rest of the empty-recording diagnosis.
 - **A change had no effect** — almost always the file never made it into the project.
   Regenerate (step 1) and rebuild.
 

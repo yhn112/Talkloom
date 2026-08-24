@@ -166,14 +166,6 @@ duplicated across them, and a test-host crash or forced interruption can leave p
 audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives thrown
 errors, plus a documented cleanup command for what a crash leaves behind.
 
-## Documentation
-
-### D22 — the resampling measurement is stated twice inside `AGENTS.md`
-`open · P2 · confirmed fact` — Once as the decision under "Audio format and separate
-tracks", again as an example under "Ask the user to make the sound".
-`scripts/check_docs.py` cannot see it: duplication inside one file is a review job.
-**Exit:** one statement of the measurement, cited rather than repeated.
-
 ## Deferred by decision
 
 ### D23 — seamless recovery after a capture path dies
