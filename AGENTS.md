@@ -16,6 +16,9 @@ session.
 
 - `PLAN.md` — product scope and the staging. Read before deciding *what* to build next, or
   when a change seems to belong to a later stage.
+- `docs/process.md` — how to run a cycle, design an experiment, write a commit, and brief
+  a subagent. Read before the first commit of a session, before a hardware run, and
+  before delegating.
 - `docs/technical-debt.md` — known design and correctness debt, prioritised. Read before
   starting cleanup work, and add to it when leaving something unfinished.
 - `docs/system-audio-capture.md` — process taps and aggregate devices, every claim cited to
@@ -54,6 +57,23 @@ a diff, and drift out of sync with the code they govern.
 When the user establishes a new rule, write it into the appropriate file in this
 repository as part of the same change.
 
+### One fact, one place
+
+Every fact, number, command, and version lives in exactly one file. Other files name it
+and point at that file; they do not restate its content. A threshold, a version literal,
+or a fix repeated in a second file is a defect, not redundancy: it gets updated in one
+place and not the other, and the stale copy is invisible in the diff that caused the
+drift.
+
+This is not hypothetical. Raising the deployment floor to macOS 15 (`a1e9e68`) updated
+`project.yml`, `PLAN.md`, and `docs/system-audio-capture.md` — and left the old floor
+standing in the role and the skill whose entire job is checking availability.
+
+So: version numbers, bundle identifiers, and thresholds do not belong in `.agents/` at
+all; roles and skills read them from `project.yml`. A role states scope, judgement, and
+what to report; the procedure it runs lives in the skill it names.
+`scripts/check_docs.py` enforces the mechanical half of this, inside `scripts/check.sh`.
+
 Technical-debt records are living handoffs, not a historical notebook. Each item names
 its status, evidence, exit criterion, and the commit that introduced or resolved it when
 known. A change that resolves or invalidates an item updates the debt record in the same
@@ -87,20 +107,9 @@ documentation when the headers are insufficient, the smallest controlled experim
 then production code. An experiment tests a stated hypothesis; it is not a substitute
 for deciding what the product needs.
 
-Keep each cycle small enough to review and interrupt safely:
-
-1. State one question or hypothesis.
-2. Make the smallest change that can answer it.
-3. Run the narrow deterministic check.
-4. Run a real-device or human-assisted check only when the question requires one.
-5. Record the evidence and unresolved conditions.
-6. Review a fixed diff, then checkpoint the logical change before beginning an unrelated
-   experiment or refactor.
-
 Do not combine a verified change and a partially applied experiment in one dirty diff.
-If the current task does not authorize commits, keep them as separate patches and report
-the boundary explicitly. Keep verbose build and test output in a file; return the status,
-the failing test, and only the relevant excerpt to the coordinating agent.
+The shape of a cycle — what to run, what to record, when to checkpoint — is in
+`docs/process.md`.
 
 ### Separate facts, measurements, and hypotheses
 
@@ -123,27 +132,16 @@ the test harness. Do not turn a measurement from one layer into a guarantee abou
 In particular, capture levels do not establish what Whisper will recognize; only an ASR
 evaluation does.
 
-### Design experiments before running them
-
-Before a hardware-dependent or diagnostic run, state the hypothesis, controlled
-stimulus, single variable, metric and time window, known confounders, and the result that
-would settle the question. Change one unknown per run. Use a constant signal for level,
-gain, timing, and ducking arithmetic; use human speech for meeting behavior and ASR.
+### A hardware run needs the user's consent, and cleans up after itself
 
 If a run uses the microphone, speakers, TCC prompts, or a person in the room, tell the
-user before launching it. Give one reproducible protocol: what to play or say, how long,
-when to stay silent, and what the recording will establish. Batch related phases into one
-protocol instead of surprising the user with repeated device runs.
-
-Keep three kinds of checks separate:
-
-- deterministic regression tests belong in the normal test suite;
-- hardware diagnostics and benchmarks belong in a separate diagnostic target or script;
-- one-off probes belong in a temporary directory or an explicitly disposable branch.
+user before launching it and ask. Never surprise them with a device run.
 
 Every hardware harness must clean up spawned processes, CoreAudio objects, recordings,
 and result bundles on success, failure, timeout, and interruption. It must be safe to run
 twice after a failed attempt.
+
+How to design the run, and where each kind of check belongs, are in `docs/process.md`.
 
 ### Missing a tool? Ask — don't route around it
 
@@ -298,50 +296,16 @@ recordings (`*.wav`, `*.caf`, `*.m4a`), transcripts, `build/`, `.venv/`, API key
 
 ## Git
 
-### Branches
+`main` always builds and stays signable. Never leave it in a state where `xcodebuild`
+fails. Work happens on topic branches named `<type>/<slug>`; branch before the first
+commit of a change, not after.
 
-`main` always builds and stays signable. Never leave it in a state where
-`xcodebuild` fails.
+Before committing, `scripts/check.sh` must pass, and staging is deliberate: never
+`git add -A` without reading what it picked up — recordings and API keys are exactly what
+leaks that way.
 
-Work happens on topic branches named `<type>/<slug>` — kebab-case, English, e.g.
-`feat/system-audio-tap`, `fix/tap-survives-device-change`. Types in use: `feat`, `fix`,
-`refactor`, `docs`, `chore`. Branch before the first commit of a change, not after, and
-delete the branch once it has been merged.
-
-### Commits
-
-Subject in the imperative, English, under 72 characters, no trailing period, prefixed
-with the area touched — `capture`, `asr`, `ui`, `storage`, `build`, `docs`:
-
-```
-capture: stop the session when the system tap stalls
-```
-
-One logical change per commit. Reformatting, renames, and behaviour changes go in
-separate commits; mixed together they make the part that matters impossible to find later.
-
-The body explains **why**, since the diff already shows what. For anything touching audio
-capture or ASR, the body carries the measurement that verifies it — peak amplitude per
-track, or WER per language. A capture change with no numbers is not reviewable, because
-the failure mode it has to rule out is a valid file full of silence.
-
-### Before committing
-
-- `scripts/check.sh` must pass.
-- `git status` must show no generated artifacts. `Transcriber.xcodeproj`, `build/`,
-  `.venv/`, models, and recordings are ignored by `.gitignore`; if one shows up anyway,
-  fix `.gitignore` rather than working around it.
-- Stage deliberately. Do not `git add -A` without reading what it picked up — recordings
-  and API keys are exactly what leaks that way.
-- No commented-out code and no debug logging left switched on.
-
-### Rewriting history
-
-Amend and rebase freely while a branch is local. Once it has been pushed or shared, do
-not force-push it.
-
-Commits written by an agent carry a `Co-Authored-By` trailer that identifies the agent.
-It is there for transparency about who wrote what; drop this rule if it is unwanted.
+Branch and commit conventions, what belongs in one commit, and the rules for rewriting
+history are in `docs/process.md`. Read it before the first commit of a session.
 
 ## What counts as verified
 
@@ -378,54 +342,27 @@ it for arithmetic, and a person for anything that has to sound like a meeting.
 
 ## Skills and delegation
 
-Reusable project skills have one source of truth under `.agents/skills/`. Codex discovers
-that directory directly. Claude Code reaches the same files through the
-`.claude/skills` symlink. Add and edit skills only in `.agents/skills`; never maintain a
-second client-specific copy.
-
-Subagent role instructions have one source of truth under `.agents/roles/`. The files in
-`.claude/agents/` and `.codex/agents/` are client-specific adapters containing only
-discovery metadata, tool or sandbox restrictions, and a pointer to the shared role. Keep
-durable role behavior in the shared file.
-
-When changing shared skills, roles, or their adapters, verify the claim for both clients
-before calling the integration complete: discovery from a fresh session, any available
-validator, and one minimal role or skill invocation through each adapter. If a client
-cannot be exercised locally, report that compatibility as unverified rather than inferred
-from matching file formats.
-
-Delegate a bounded specialist task when one of these roles matches. The main agent owns
-coordination, waits for delegated work, and integrates the result. Do not send two
-write-capable agents into overlapping files at the same time, and do not ask multiple
-agents for broad audits of the same subsystem.
-
-A delegation request names:
-
-- the exact commit, base/head pair, or dirty-diff snapshot to examine;
-- one independent question and the files or responsibility the agent owns;
-- whether the task is read-only or which files it may edit;
-- the evidence required for a conclusion and the checks the agent should run;
-- the requested output, normally no more than the five highest-value findings.
-
-Every finding uses the evidence categories above and includes confidence. A specialist
-must distinguish a reproduced defect from a code risk and a future design issue. The
-coordinating agent verifies that evidence before changing priorities or recording a P0.
-
-A review verdict applies only to the named snapshot. The reviewer reports the revision
-or diff it examined; any subsequent edit to the reviewed files invalidates the verdict
-and requires a new review. Freeze those files while the final review is running.
-
-Before relying on a delegated agent's findings, confirm it actually returned them.
-Interrupting a turn also cancels the subagents that turn started, and the cancellation is
-silent: no completion notification arrives and the agent's report is never written. Treat
-"no result yet" as a state to check, never as evidence that work is still in progress.
+Reusable project skills have one source of truth under `.agents/skills/`; subagent role
+instructions have one under `.agents/roles/`. Codex discovers those directories directly,
+Claude Code reaches the skills through the `.claude/skills` symlink, and the files in
+`.claude/agents/` and `.codex/agents/` are client-specific adapters holding only discovery
+metadata, tool or sandbox restrictions, and a pointer to the shared role. Add and edit
+skills and roles only under `.agents/`; never maintain a second client-specific copy.
 
 - `api-scout` — confirm a system API's signature, availability, and semantics before code is written.
 - `audio-capture` — implement and debug the audio capture layer.
 - `swift-reviewer` — review concurrency and real-time safety before calling a task done.
 - `asr-quality` — model selection, hallucination control, Russian/English quality.
 
+Delegate a bounded specialist task when one of these roles matches. The main agent owns
+coordination, waits for delegated work, and integrates the result. Do not send two
+write-capable agents into overlapping files at the same time, and do not ask multiple
+agents for broad audits of the same subsystem. Keep small, tightly coupled tasks in the
+main agent when delegation would add coordination without independent work.
+
 For an audio-capture or concurrency change, delegate the final read-only review to
 `swift-reviewer` before declaring the work complete. For an unfamiliar macOS system API,
-delegate verification to `api-scout` before implementation. Keep small, tightly coupled
-tasks in the main agent when delegation would add coordination without independent work.
+delegate verification to `api-scout` before implementation.
+
+How to brief a specialist, what it owes in return, and how a review verdict is scoped are
+in `docs/process.md`.

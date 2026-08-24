@@ -67,10 +67,9 @@ impossible to tell which one mattered.
 
 If no fixture covers your hypothesis, add the fixture first.
 
-Do not substitute capture metrics for this evaluation. Peak and RMS levels can explain
-why a fixture deserves testing, but they cannot establish whether Whisper recognizes,
-misses, or hallucinates text. Conversely, an ASR regression does not identify a capture
-cause without a separate `audio-doctor` measurement.
+Capture metrics are not a substitute for this evaluation, and an ASR regression does not
+identify a capture cause without a separate `audio-doctor` measurement (`AGENTS.md`,
+"Separate facts, measurements, and hypotheses").
 
 ## What to report
 

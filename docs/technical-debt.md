@@ -166,19 +166,30 @@ provide an explicit cleanup command for those artifacts.
 
 ## Documentation ownership
 
-The native-rate/offline-resampling decision is repeated in `AGENTS.md`, `PLAN.md`, roles,
-skills, source comments and tests, and the copies have already diverged. Keep ownership
-narrow:
+**Status: mostly resolved.** The ownership split is now a rule in `AGENTS.md` ("One fact,
+one place") and its mechanical half is enforced by `scripts/check_docs.py` inside
+`scripts/check.sh`: no version literals in `.agents/`, no dangling paths, no roster drift
+between the two clients, and the bundle identifier checked against `project.yml`.
+
+The ownership itself:
 
 - `PLAN.md`: product stages and architectural outcomes;
 - `AGENTS.md`: enforceable repository and implementation rules;
-- `docs/`: measurements, API research and architecture decisions;
+- `docs/`: measurements, API research, architecture decisions, and procedure;
 - roles and skills: how to perform or verify work, without restating the architecture;
 - source comments: only the local invariant needed to understand that code.
 
-In particular, remove remaining claims that capture writes 16 kHz files or uses a live
-converter. The master is mono Int16 at the source sample rate; the 16 kHz ASR copy is an
-offline derivative.
+Reproduced evidence for the original item: `a1e9e68` raised the deployment floor to
+macOS 15 and updated `project.yml`, `PLAN.md` and `docs/system-audio-capture.md`, leaving
+the old floor in `.agents/roles/api-scout.md` and `.agents/skills/check-api/SKILL.md`.
+Both are corrected and the check now fails on a reintroduced version literal.
+
+Remaining, not blocking: the claim that capture writes 16 kHz files or uses a live
+converter no longer appears anywhere, but the resampling argument is still stated twice
+inside `AGENTS.md` itself (the decision, and again as an example under "Ask the user to
+make the sound"). Exit criterion: one statement of the measurement in `AGENTS.md`, cited
+rather than repeated elsewhere. The check cannot see this — prose duplication inside one
+file is a human review job.
 
 ## Deferred recovery
 

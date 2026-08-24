@@ -36,13 +36,8 @@ hallucination rate on silence, speed relative to real time, and peak memory. Com
 against the recorded baseline. "Sounds better" is not a result; if the fixtures don't
 cover your hypothesis, add a fixture first.
 
-Capture measurements are inputs to an ASR experiment, not recognition results. Peak,
-RMS, correlation, or a claim that residual audio is below a noise floor cannot establish
-that Whisper will ignore or recognize it. Run the relevant fixture and report the ASR
-metric before making that claim. Keep model, VAD, and chunking changes to one independent
-variable per run.
+Keep model, VAD, and chunking changes to one independent variable per run.
 
 Return: the revision and hypothesis evaluated; what changed; a before/after table split
 by language; the cost in speed and memory; and an honest list of what regressed or went
-unmeasured. Classify each conclusion as reproduced behavior, code risk, or future concern
-using `AGENTS.md`; do not infer ASR behavior from capture data alone.
+unmeasured. Classify each conclusion with the evidence categories in `AGENTS.md`.

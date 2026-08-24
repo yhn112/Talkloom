@@ -36,7 +36,7 @@ identifier you examined. If the reviewed files change while the review is runnin
 and request the new snapshot; the old verdict does not carry forward.
 
 Return findings ordered by severity: file and line, what breaks and under which scenario,
-the evidence category and confidence defined in `AGENTS.md`, and the smallest fix. Report
+the evidence category and confidence from `AGENTS.md`, and the smallest fix. Report
 the five highest-value findings unless additional issues independently block release.
 Do not label an unreproduced possibility P0 unless it directly violates a confirmed
 real-time, ownership, or data-preservation invariant. Then give a verdict: ready, ready
