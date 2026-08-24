@@ -68,14 +68,33 @@ can block or run for an unbounded time is forbidden: allocation, locks, file I/O
 `print`, `async`/`await`, Foundation collections, and ARC traffic on objects whose
 lifetime isn't guaranteed.
 
-A callback only copies samples into a preallocated lock-free ring buffer. Resampling,
-disk writes, VAD, and ASR belong to a separate thread or actor that drains the buffer.
+A callback only copies samples into a preallocated lock-free ring buffer. Disk writes,
+VAD, and ASR belong to a separate thread or actor that drains the buffer; resampling does
+not belong to either, and happens offline once the file is finished — see below.
 Violating this produces clicks and dropouts that take hours to track down later.
 
 ### Audio format and separate tracks
 
-The canonical ASR format is 16 kHz mono: Int16 PCM on disk, Float32 in `[-1, 1]` in
-memory for Whisper.
+Capture writes the device's own format, untouched — mono Int16 PCM at whatever sample rate
+the device reports. That file is the master. The canonical ASR format, 16 kHz mono Int16 on
+disk and Float32 in `[-1, 1]` in memory for Whisper, is **derived from the master
+afterwards**, over the finished file, with `afconvert`.
+
+**Never resample on the audio path.** A resampler is a polyphase FIR holding some 30 input
+frames in its delay line, and it only releases them when the stream is declared finished. A
+drain loop can never declare that — more audio is always coming — so it abandons the
+filter's contents on every pass, and any pass that hands the converter more input than one
+call consumes loses the remainder outright, reporting success either way. Measured on a
+one-second 48 kHz tone through a 50 ms drain loop: 6% of the recording gone. The same
+conversion over a finished file is frame-exact at every rate a device might report. Nothing
+in this project needs live audio — transcription happens after the meeting.
+
+`afconvert` rather than `ffmpeg` for anything the app itself runs: it ships with macOS, so
+the app does not acquire a Homebrew dependency it cannot satisfy on someone else's machine.
+`ffmpeg` stays available for the Python evaluation tooling, which only ever runs here.
+
+Keeping the master also means a better model can be re-run later against the original audio
+instead of against a downsampled copy.
 
 **Microphone and system audio are written to two separate files and never mixed.** This
 is the foundation of diarization, not an implementation detail: the split already gives

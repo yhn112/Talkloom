@@ -65,6 +65,14 @@ final class AudioRingBuffer: @unchecked Sendable {
         droppedCursor.load(ordering: .relaxed)
     }
 
+    /// Records samples the producer discarded before they ever reached the buffer.
+    ///
+    /// A block too large to be downmixed is lost just as surely as one that did not fit, and
+    /// a hole in the recording should be counted the same way whichever end dropped it.
+    func recordDrop(sampleCount: Int) {
+        droppedCursor.wrappingIncrement(by: sampleCount, ordering: .relaxed)
+    }
+
     /// Copies `count` samples in. Real-time safe: no allocation, no locks, no ARC.
     ///
     /// Returns `false` and drops the entire block when there is not enough room. Dropping

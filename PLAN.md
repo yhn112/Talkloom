@@ -72,7 +72,8 @@ survive rebuilds.
   echo back into the mic track and duplicate every line.
 - System audio via `AudioHardwareCreateProcessTap` plus an aggregate device
   (available since macOS 14.2).
-- Resample both streams to 16 kHz mono; write two files.
+- Write two files in the device's own format; resampling to 16 kHz happens later, over
+  the finished file, never on the audio path.
 - Known traps: Voice Processing IO silently reports a different channel layout, which
   makes a mono-configured `AVAudioConverter` emit silence instead of failing; automatic
   ducking quiets the other participants unless
@@ -86,6 +87,7 @@ survive rebuilds.
   needs — small models degrade far more on Russian than on English.
 - Silero VAD ahead of ASR. This is mandatory, not cosmetic: on silence Whisper emits
   confident hallucinations lifted from training subtitles.
+- Derive the 16 kHz mono tracks from the masters with `afconvert` before transcribing.
 - Transcribe both tracks after the meeting; merge by timestamp, labelling mic segments
   "me" and system segments "them".
 - A `Transcriber` protocol with a second, cloud-backed implementation behind a setting.

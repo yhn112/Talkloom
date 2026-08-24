@@ -9,6 +9,9 @@ struct RecordingSession: Equatable, Sendable {
     let directory: URL
     let startedAt: Date
 
+    /// The masters, written in the device's own format while recording. The 16 kHz mono
+    /// copies ASR wants are derived from these afterwards, so a better model can later be
+    /// re-run against the original audio rather than against a downsampled copy.
     var microphoneTrackURL: URL { directory.appending(path: "mic.wav") }
     var systemTrackURL: URL { directory.appending(path: "system.wav") }
 
