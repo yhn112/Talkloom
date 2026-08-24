@@ -94,6 +94,29 @@ When a parameterized Swift Testing case fails, `xcsift` names the test but not t
 argument — it reports `header field, Test failed`. Re-run without the pipe to see which
 row broke; the raw output names it.
 
+### Sanitizer runs
+
+Thread and address sanitizers over the hardware-free tests, both the package and the app:
+
+```bash
+scripts/sanitize.sh            # both, about 35 seconds
+scripts/sanitize.sh thread     # or one of them
+```
+
+Run it after touching `AudioRingBuffer`, anything holding an `Unsafe*Pointer`, or actor
+isolation on the capture path. The two sanitizers cannot be enabled together, so each is a
+separate pass; the script does them in turn and prints the sanitizer's own summary, which
+names the racing accesses, before the test verdict. Full output is kept at
+`build-san/sanitize.log`.
+
+Sanitizer builds use their own `-derivedDataPath`, so a run does not poison the ordinary
+build cache and an ordinary build cannot satisfy a sanitizer run. Device tests are out of
+scope on purpose: instrumentation slows the audio callback enough to manufacture dropouts.
+
+A report does fail the run — verified against a deliberate race, which exits 65 with
+`** TEST FAILED **`. Do not pipe this through `xcsift`; it discards the sanitizer summary,
+which is the only part that says which access raced.
+
 ### Tests that use the real microphone
 
 Capture code is only verified against a real recording, so those tests live in the

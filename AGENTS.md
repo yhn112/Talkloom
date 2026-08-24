@@ -281,6 +281,11 @@ one `@Test(arguments:)` where every row is a named case beats a dozen assertions
 test whose failure names only the test. `WAVWriterTests` is the example to copy. A test
 whose assertion is about the whole table — the ducking ranking — stays one test.
 
+Sanitizers are a separate, rare run: `scripts/sanitize.sh`, about half a minute. Required
+before calling done a change to the ring buffer, to anything holding an `Unsafe*Pointer`,
+or to actor isolation on the capture path — a green `scripts/check.sh` says nothing at all
+about a data race. Deliberately not part of that gate; the skill `build` has the procedure.
+
 Anything touching audio hardware belongs under the `DeviceTests` suite, whatever file it
 lives in. That suite is `.serialized`, and it has to be: Swift Testing runs tests in
 parallel by default, while the microphone, the process tap and the default output device

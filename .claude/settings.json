@@ -24,7 +24,8 @@
       "Bash(python3 scripts/check_docs.py:*)",
       "Bash(swift test:*)",
       "Bash(xcsift:*)",
-      "Bash(scripts/track_compare.py:*)"
+      "Bash(scripts/track_compare.py:*)",
+      "Bash(scripts/sanitize.sh:*)"
     ],
     "deny": []
   }

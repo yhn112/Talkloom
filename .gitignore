@@ -44,3 +44,7 @@ Packages/*/.swiftpm/
 
 # macOS
 .DS_Store
+
+# Sanitizer runs keep their own derived data; instrumented objects must not be
+# reused by an ordinary build (scripts/sanitize.sh).
+/build-san/
