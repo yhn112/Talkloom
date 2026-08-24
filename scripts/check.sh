@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The project's one gate: everything that can be verified without a microphone.
 #
-# Regenerates the project, checks formatting, builds, and runs the tests that need no
-# hardware. Prints one line per step and exits non-zero on the first failure, so an agent
+# Regenerates the project, checks the instructions for drift, checks formatting, builds,
+# and runs the tests that need no hardware. Prints one line per step and exits non-zero on the first failure, so an agent
 # can treat it as the definition of "done" for anything short of a real recording.
 #
 # What this deliberately does NOT cover: capture correctness. A green run here is
@@ -28,7 +28,19 @@ step generate
 xcodegen generate --quiet
 ok
 
-# 2. Formatting. swift-format has no --check mode, so the tree is formatted into a copy and
+# 2. The instructions. Roles, skills and adapters are read as authoritative and fail
+# silently when they go stale, so the mechanical half of that is checked here: no
+# duplicated version literals, no dangling paths, no roster drift between the clients.
+step docs
+if docs_problems=$(python3 scripts/check_docs.py 2>&1); then
+    ok
+else
+    fail
+    echo "$docs_problems" | sed 's/^/  /'
+    exit 1
+fi
+
+# 3. Formatting. swift-format has no --check mode, so the tree is formatted into a copy and
 # compared: a file that the formatter would change is a file that is not formatted.
 # Comparing output rather than running `lint --strict` is deliberate — a Logger message is
 # one string literal, the formatter cannot break it, and the resulting over-long line would
@@ -50,7 +62,7 @@ else
     exit 1
 fi
 
-# 3. The package's own tests. They need no signing, no test host and no hardware, so they
+# 4. The package's own tests. They need no signing, no test host and no hardware, so they
 # run first and in about a second: a broken WAV header should not cost a full app build to
 # discover.
 step package
@@ -62,7 +74,7 @@ else
     exit 1
 fi
 
-# 4. Build and tests. Device tests live in their own scheme and are skipped here: they need
+# 5. Build and tests. Device tests live in their own scheme and are skipped here: they need
 # a microphone and make audible noise. xcsift collapses xcodebuild's output — measured at
 # 98 kB for a green run against 127 bytes — while -E preserves the failure exit code, which
 # the pipeline would otherwise swallow.

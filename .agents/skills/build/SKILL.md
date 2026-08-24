@@ -14,12 +14,14 @@ description: Build, sign, and launch Transcriber.app, run the tests, and read th
 scripts/check.sh
 ```
 
-Regenerates the project, checks formatting, builds, and runs the hardware-free tests —
-about six seconds, one line per step, non-zero exit on the first failure. Use it for
-every ordinary change; the steps below are for when something needs to be done by hand,
-and for running the app.
+Regenerates the project, checks the instructions for drift, checks formatting, builds, and
+runs the hardware-free tests — about six seconds, one line per step, non-zero exit on the
+first failure. Use it for every ordinary change; the steps below are for when something
+needs to be done by hand, and for running the app.
 
-If it reports a formatting failure, `scripts/format.sh` fixes it.
+If it reports a formatting failure, `scripts/format.sh` fixes it. If it reports a `docs`
+failure, the instructions name something that no longer exists — fix the instruction, not
+the check.
 
 ## Steps
 
