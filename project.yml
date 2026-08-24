@@ -22,8 +22,21 @@ settings:
     # See scripts/make-signing-cert.sh
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Transcriber Dev"
-    ENABLE_HARDENED_RUNTIME: YES
     DEVELOPMENT_TEAM: ""
+    # Xcode splits the app into a stub plus Transcriber.debug.dylib to support SwiftUI
+    # Previews. dyld then refuses to load that dylib into the app because a self-signed
+    # certificate carries no Team ID, and "unset" does not count as a match. Previews
+    # need the Xcode GUI anyway, so turn the split off and keep one signed binary.
+    ENABLE_DEBUG_DYLIB: NO
+  configs:
+    Debug:
+      # The hardened runtime makes dyld require a matching Team ID for any code loaded
+      # into the process. A self-signed certificate has no Team ID, so the XCTest bundle
+      # cannot be injected into the app and every test run dies before starting. It is a
+      # distribution requirement, not a development one, so it stays off while debugging.
+      ENABLE_HARDENED_RUNTIME: NO
+    Release:
+      ENABLE_HARDENED_RUNTIME: YES
 
 targets:
   Transcriber:
@@ -52,9 +65,12 @@ targets:
       - target: Transcriber
     settings:
       base:
-        # Tests exercise pure logic — ring buffer, segment merging, WAV writing —
-        # without touching hardware or requesting permissions.
-        CODE_SIGN_IDENTITY: "-"
+        # The app bundle uses the checked-in Resources/Info.plist; a test bundle has no
+        # plist of its own, and codesign refuses to sign a bundle without one.
+        GENERATE_INFOPLIST_FILE: YES
+        # Inherit the app's signing identity rather than signing ad-hoc. The test bundle
+        # is injected into the app process, and dyld refuses to load code whose team
+        # identity differs from the host's.
 
 schemes:
   Transcriber:
