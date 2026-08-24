@@ -241,6 +241,39 @@ struct RecordingControllerTests {
         #expect(written.tracks.first?.failure == controller.errorMessage)
     }
 
+    /// The tracks are finalized on disk while the only description of them still says
+    /// `recording` and carries no timestamps. Reporting that as a clean stop would leave the
+    /// user with a session nothing downstream can read, and no reason to look.
+    @Test("a session whose manifest cannot be replaced does not stop successfully")
+    func aSessionWhoseManifestCannotBeReplacedFails() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: FakeSystemAudio()
+        )
+        await controller.start()
+        let session = try #require(controller.currentSession)
+
+        // A read-only directory is the cheapest reproduction: the manifest is replaced
+        // atomically, so the temporary file it writes alongside cannot be created either.
+        let path = session.directory.path
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path) }
+
+        await controller.stop()
+
+        let message = try #require(controller.errorMessage)
+        #expect(message.contains("could not be described on disk"))
+        #expect(message.contains(session.directory.lastPathComponent))
+        // What survived on disk is the in-progress manifest, which is what a recovery pass
+        // has to find: `completed` would have been a lie, and nothing at all would look
+        // like a directory that was never a session.
+        #expect(try manifest(in: session).status == .recording)
+    }
+
     /// When the tap does not come up, the session continues on the microphone alone with
     /// echo cancellation off — which means that recording holds both sides of the call. The
     /// menu bar says so while the app is open; the manifest has to say so for good, because

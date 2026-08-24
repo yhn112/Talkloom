@@ -203,17 +203,29 @@ final class RecordingController {
         logTrackOffset()
         let completions = [tracks.0, tracks.1].compactMap { $0 }
         let finalFailure = failure ?? completions.compactMap(\.failure).first?.localizedDescription
-        writeManifest(
+        let manifestFailure = writeManifest(
             for: session,
             completions: completions,
             failure: finalFailure,
             warning: warning
         )
 
-        if let finalFailure {
-            fail(finalFailure)
-        } else {
+        // A session whose manifest could not be replaced is not a session that stopped
+        // successfully, whatever the tracks did: the audio is finalized on disk while the
+        // only description of it still says `recording` and carries no track timestamps.
+        // Reporting that as a clean stop hides the one thing the reader of that directory
+        // would need to know.
+        switch (finalFailure, manifestFailure) {
+        case (nil, nil):
             state = .idle
+        case (let trackFailure?, nil):
+            fail(trackFailure)
+        case (nil, let manifestFailure?):
+            fail(
+                "The tracks were saved in \(session.directory.lastPathComponent), but the session could not be described on disk: \(manifestFailure)"
+            )
+        case (let trackFailure?, let manifestFailure?):
+            fail("\(trackFailure) The session could not be described on disk either: \(manifestFailure)")
         }
     }
 
@@ -229,12 +241,15 @@ final class RecordingController {
         return HostTime.seconds(from: microphoneStart, to: systemStart)
     }
 
+    /// Replaces the in-progress manifest with the finished one.
+    ///
+    /// - Returns: `nil` when the session now describes itself on disk, or why it does not.
     private func writeManifest(
         for session: RecordingSession,
         completions: [TrackRecorder.Completion],
         failure: String?,
         warning: String?
-    ) {
+    ) -> String? {
         do {
             try RecordingManifest(
                 startedAt: session.startedAt,
@@ -243,10 +258,12 @@ final class RecordingController {
                 warning: warning
             )
             .write(to: session.directory)
+            return nil
         } catch {
             AppLog.capture.error(
                 "could not write the session manifest: \(error.localizedDescription, privacy: .public)"
             )
+            return error.localizedDescription
         }
     }
 

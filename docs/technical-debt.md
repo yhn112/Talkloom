@@ -34,12 +34,6 @@ offline transcription is built on top of capture. It is not a second product roa
   timeline made of spans with their own host-time anchors, which is the same representation
   the deferred recovery work below needs; until then the interim policy stands, and the
   price it charges is a session lost to one dropped block.
-- Treat failure to replace the in-progress manifest as a session failure visible to the
-  user. `RecordingController.writeManifest` currently logs the error and returns, after
-  which the controller enters `idle`; the WAV files can therefore be finalized while the
-  only manifest still says `recording` and contains no track timestamps. The exit criterion
-  is that manifest finalization participates in the controller result and cannot be
-  reported as a successful stop.
 - Recover interrupted sessions by manifest status, not only by manifest absence. A
   recording interrupted by a crash or a kill leaves WAV headers claiming zero bytes, so
   the tracks read as empty although the samples are on disk. Recovering only sessions
@@ -206,6 +200,10 @@ anchors, then cover device switches with real-device tests.
   session-level failures are preserved in `session.json`.
 - Unexpected system-audio buffer layouts fail the track instead of accumulating as an
   unreported diagnostic count.
+- Manifest finalization participates in the controller's result. A session whose
+  `session.json` could not be replaced reports a failure naming its directory instead of
+  entering `idle`, so finalized tracks are never presented as a clean stop while the only
+  description of them still says `recording`.
 - A failure the drain observes stops the session while the meeting is still being recorded,
   rather than surfacing when the user presses stop. `TrackRecorder.observeFailures` hands
   the first failure to the capture path that owns the track, which reports it through the
