@@ -15,7 +15,12 @@ settings:
     SWIFT_VERSION: "6.0"
     # Races in audio code are far cheaper to catch at compile time than in production.
     SWIFT_STRICT_CONCURRENCY: complete
-    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    # AGENTS.md forbids silencing compiler warnings; this is that rule with teeth. A
+    # warning here is usually the compiler describing exactly the class of mistake this
+    # project cannot afford — an unused result from a CoreAudio call, a capture of self in
+    # an escaping closure, a deprecated API that still compiles. Dependencies built by
+    # SwiftPM keep their own settings and are unaffected.
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     # A local self-signed certificate stays stable across builds, so TCC grants survive.
