@@ -100,8 +100,18 @@ Capture code is only verified against a real recording, so those tests live in t
 ```bash
 xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceTests \
   -derivedDataPath build test \
-  -only-testing:TranscriberTests/MicrophoneCaptureDeviceTests
+  -only-testing:TranscriberTests/DeviceTests/Microphone
 ```
+
+The suites are `Microphone`, `SystemAudio`, `Controller`, `StartupLatency`,
+`VoiceProcessingLayout` and `Ducking`, and the `DeviceTests/` in the middle is not
+optional: they are nested inside that suite so `.serialized` can keep two captures from
+running at once. **An identifier that matches nothing runs zero tests and reports
+success** — `-only-testing:TranscriberTests/Microphone` exits 0 having done nothing at
+all. Check the count in the output (`Test run with N tests`) rather than the exit status.
+
+Ducking is the slow one: nine four-second measurements of a 440 Hz tone, about a minute of
+noise. Leave it out unless the ducking configuration is what is being checked.
 
 They record from the microphone and speak out loud for a few seconds. They print the
 measured rate, duration, peak amplitude and dropped-sample count for each track — those

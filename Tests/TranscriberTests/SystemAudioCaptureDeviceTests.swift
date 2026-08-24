@@ -1,123 +1,108 @@
 import AVFoundation
+import Foundation
+import Testing
 import TranscriberCore
-import XCTest
 
 @testable import Transcriber
 
-/// Records the machine's own output through a CoreAudio process tap. Opt-in for the same
-/// reasons as the microphone tests, plus one of its own: the first run asks for the Audio
-/// Recording permission, and until it is granted the tap produces a silent file rather than
-/// an error.
-///
-///     xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceTests \
-///       -derivedDataPath build test \
-///       -only-testing:TranscriberTests/SystemAudioCaptureDeviceTests
-final class SystemAudioCaptureDeviceTests: XCTestCase {
-    private var directory = URL(fileURLWithPath: "/dev/null")
+extension DeviceTests {
+    /// Records the machine's own output through a CoreAudio process tap. Opt-in for the
+    /// same reasons as the microphone tests, plus one of its own: the first run asks for
+    /// the Audio Recording permission, and until it is granted the tap produces a silent
+    /// file rather than an error.
+    @Suite("system audio capture")
+    final class SystemAudio {
+        private let directory: URL
 
-    override func setUpWithError() throws {
-        try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["TRANSCRIBER_DEVICE_TESTS"] == "1",
-            "set TRANSCRIBER_DEVICE_TESTS=1 to run the tests that use real audio devices"
-        )
-        directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appending(path: "SystemAudioDeviceTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    }
+        init() throws {
+            directory = try DeviceTests.makeDirectory("SystemAudioDeviceTests")
+        }
 
-    override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: directory)
-    }
+        deinit {
+            try? FileManager.default.removeItem(at: directory)
+        }
 
-    private func playSomething() -> Process {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        process.arguments = ["-r", "180", "One two three four five six seven eight nine ten"]
-        try? process.run()
-        return process
-    }
-
-    private func report(_ summary: TrackRecorder.Summary, _ input: TrackInput? = nil) {
-        if let input {
-            let shape = input.lastBufferListShape
+        private func report(_ summary: TrackRecorder.Summary, _ input: TrackInput? = nil) {
+            if let input {
+                let shape = input.lastBufferListShape
+                print(
+                    "  [\(summary.label)] last block: \(shape.buffers) buffer(s), \(shape.channels) ch, \(shape.byteCount) bytes"
+                )
+            }
             print(
-                "  [\(summary.label)] last block: \(shape.buffers) buffer(s), \(shape.channels) ch, \(shape.byteCount) bytes"
+                "  [\(summary.label)] rate=\(summary.sampleRate) Hz frames=\(summary.frameCount) "
+                    + "duration=\(String(format: "%.2f", summary.duration)) s "
+                    + "peak=\(String(format: "%.4f", summary.peakAmplitude)) dropped=\(summary.droppedSampleCount)"
             )
         }
-        print(
-            "  [\(summary.label)] rate=\(summary.sampleRate) Hz frames=\(summary.frameCount) "
-                + "duration=\(String(format: "%.2f", summary.duration)) s "
-                + "peak=\(String(format: "%.4f", summary.peakAmplitude)) dropped=\(summary.droppedSampleCount)"
-        )
-    }
 
-    /// The tap has to hear what the machine plays. A silent file here means either the
-    /// permission is missing or the aggregate device was built wrong — both look like
-    /// success from the API's side.
-    func testTheTapRecordsWhatTheMachinePlays() async throws {
-        let capture = SystemAudioCapture()
-        let url = directory.appending(path: "system.wav")
+        /// The tap has to hear what the machine plays. A silent file here means either the
+        /// permission is missing or the aggregate device was built wrong — both look like
+        /// success from the API's side.
+        @Test("the tap records what the machine plays")
+        func theTapRecordsWhatTheMachinePlays() async throws {
+            let capture = SystemAudioCapture()
+            let url = directory.appending(path: "system.wav")
 
-        let sampleRate = try await capture.start(writingTo: url)
-        let playback = playSomething()
-        try await Task.sleep(for: .seconds(4))
-        playback.terminate()
-        let stopped = await capture.stop()
-        let summary = try XCTUnwrap(stopped).summary
-        report(summary)
+            let sampleRate = try await capture.start(writingTo: url)
+            let playback = DeviceTests.speak()
+            try await Task.sleep(for: .seconds(4))
+            playback.terminate()
+            let summary = try #require(await capture.stop()).summary
+            report(summary)
 
-        XCTAssertGreaterThan(sampleRate, 0)
-        XCTAssertEqual(summary.duration, 4.0, accuracy: 1.0)
-        XCTAssertEqual(summary.droppedSampleCount, 0, "the drain loop kept up with the tap")
-        XCTAssertFalse(
-            summary.isSilent,
-            "peak was \(summary.peakAmplitude); grant Audio Recording under System Settings › Privacy & Security"
-        )
-        XCTAssertGreaterThan(summary.peakAmplitude, 0.01)
+            #expect(sampleRate > 0)
+            #expect(abs(summary.duration - 4.0) < 1.0)
+            #expect(summary.droppedSampleCount == 0, "the drain loop kept up with the tap")
+            #expect(
+                !summary.isSilent,
+                "peak was \(summary.peakAmplitude); grant Audio Recording under System Settings › Privacy & Security"
+            )
+            #expect(summary.peakAmplitude > 0.01)
 
-        let file = try AVAudioFile(forReading: url)
-        XCTAssertEqual(file.fileFormat.sampleRate, summary.sampleRate)
-        XCTAssertEqual(file.fileFormat.channelCount, 1)
-        XCTAssertEqual(file.length, AVAudioFramePosition(summary.frameCount))
-    }
+            let file = try AVAudioFile(forReading: url)
+            #expect(file.fileFormat.sampleRate == summary.sampleRate)
+            #expect(file.fileFormat.channelCount == 1)
+            #expect(file.length == AVAudioFramePosition(summary.frameCount))
+        }
 
-    /// Both tracks running at once, which is the only configuration that matters. They must
-    /// each carry a timestamp from the audio hardware, because the two streams do not start
-    /// together and everything downstream merges them on that offset.
-    func testBothTracksRecordTogetherAndShareATimeOrigin() async throws {
-        let microphone = MicrophoneCapture()
-        let systemAudio = SystemAudioCapture()
-        let microphoneURL = directory.appending(path: "mic.wav")
-        let systemURL = directory.appending(path: "system.wav")
+        /// Both tracks running at once, which is the only configuration that matters. They
+        /// must each carry a timestamp from the audio hardware, because the two streams do
+        /// not start together and everything downstream merges them on that offset.
+        @Test("both tracks record together and share a time origin")
+        func bothTracksRecordTogetherAndShareATimeOrigin() async throws {
+            let microphone = MicrophoneCapture()
+            let systemAudio = SystemAudioCapture()
+            let microphoneURL = directory.appending(path: "mic.wav")
+            let systemURL = directory.appending(path: "system.wav")
 
-        _ = try await systemAudio.start(writingTo: systemURL)
-        // Match production order: preserve remote audio while Voice Processing IO starts.
-        // Bringing VPIO up mutates the output graph, so this order needs its own hardware
-        // coverage even though the inverse order is easier on CoreAudio.
-        _ = try await microphone.start(writingTo: microphoneURL)
-        let playback = playSomething()
-        try await Task.sleep(for: .seconds(4))
-        playback.terminate()
+            _ = try await systemAudio.start(writingTo: systemURL)
+            // Match production order: preserve remote audio while Voice Processing IO
+            // starts. Bringing VPIO up mutates the output graph, so this order needs its own
+            // hardware coverage even though the inverse order is easier on CoreAudio.
+            _ = try await microphone.start(writingTo: microphoneURL)
+            let playback = DeviceTests.speak()
+            try await Task.sleep(for: .seconds(4))
+            playback.terminate()
 
-        let stoppedMicrophone = await microphone.stop()
-        let stoppedSystem = await systemAudio.stop()
-        let microphoneTrack = try XCTUnwrap(stoppedMicrophone).summary
-        let systemTrack = try XCTUnwrap(stoppedSystem).summary
-        report(microphoneTrack)
-        report(systemTrack)
+            let microphoneTrack = try #require(await microphone.stop()).summary
+            let systemTrack = try #require(await systemAudio.stop()).summary
+            report(microphoneTrack)
+            report(systemTrack)
 
-        XCTAssertNotEqual(microphoneTrack.url, systemTrack.url, "the tracks are never one file")
-        XCTAssertFalse(systemTrack.isSilent, "the system track heard nothing")
-        XCTAssertGreaterThan(microphoneTrack.frameCount, 0)
+            #expect(microphoneTrack.url != systemTrack.url, "the tracks are never one file")
+            #expect(!systemTrack.isSilent, "the system track heard nothing")
+            #expect(microphoneTrack.frameCount > 0)
 
-        let microphoneStart = try XCTUnwrap(microphoneTrack.firstSampleHostTime)
-        let systemStart = try XCTUnwrap(systemTrack.firstSampleHostTime)
-        let offset = HostTime.seconds(from: microphoneStart, to: systemStart)
-        print("  system audio started \(String(format: "%.3f", offset)) s after the microphone")
+            let microphoneStart = try #require(microphoneTrack.firstSampleHostTime)
+            let systemStart = try #require(systemTrack.firstSampleHostTime)
+            let offset = HostTime.seconds(from: microphoneStart, to: systemStart)
+            print("  system audio started \(String(format: "%.3f", offset)) s after the microphone")
 
-        // Not an assertion that they start together — they do not, and the code must not
-        // assume they do. Only that the offset is a plausible number rather than a mach
-        // timebase conversion gone wrong by orders of magnitude.
-        XCTAssertLessThan(abs(offset), 10.0)
+            // Not an assertion that they start together — they do not, and the code must not
+            // assume they do. Only that the offset is a plausible number rather than a mach
+            // timebase conversion gone wrong by orders of magnitude.
+            #expect(abs(offset) < 10.0)
+        }
     }
 }
