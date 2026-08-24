@@ -75,8 +75,16 @@ struct MenuBarView: View {
                 }
             }
 
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+            Button("Quit") {
+                // Stop first. Quitting mid-recording would leave the WAV header still
+                // claiming zero bytes — a file that opens and plays as silence — and the
+                // tap's aggregate device behind in the user's audio system.
+                Task {
+                    await controller.stop()
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+            .keyboardShortcut("q")
         }
     }
 

@@ -159,9 +159,12 @@ actor MicrophoneCapture {
         // Producer first: anything written after the recorder is finished never reaches disk.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        // Leave the device as we found it. Voice processing is a property of the shared
-        // hardware, not of this engine.
-        try? engine.inputNode.setVoiceProcessingEnabled(false)
+        // Voice processing is deliberately left enabled. Turning it off here reconfigures
+        // the audio unit at the exact moment everything around it is being torn down, and
+        // AVFAudio's own property listener then fired against freed memory — a reproducible
+        // SIGSEGV in AVAudioIOUnit::IOUnitPropertyListener. A stopped engine captures
+        // nothing either way, so the only thing switching it off achieved was the crash,
+        // and leaving it on makes the next recording start sooner.
 
         let summary = await recorder.finish()
         AppLog.capture.notice(

@@ -103,7 +103,15 @@ product regression, not an optimization.
 
 Both tracks must share a common time origin so segments can be merged by timestamp.
 Capture each stream's start time explicitly instead of assuming the two streams start
-together.
+together — they do not. The process tap delivers its first sample almost immediately;
+the microphone's echo canceller takes about 0.75 s to come up, and some 2.7 s the first
+time in a process. That gap is accepted rather than hidden: the meeting's opening seconds
+exist only on the system side. Removing it would mean holding the microphone open before
+the user asks to record, and a transcriber that lights the microphone indicator while
+idle is not a trade this project makes.
+
+Each track's first-sample timestamp is written to `session.json` beside the audio, so a
+recording explains its own timeline to whatever reads it next.
 
 ### Swift 6
 

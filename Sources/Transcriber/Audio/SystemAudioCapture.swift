@@ -66,6 +66,26 @@ actor SystemAudioCapture {
 
     var isRunning: Bool { recorder != nil }
 
+    /// Last resort for the tap and its aggregate device.
+    ///
+    /// `stop()` is the ordinary path and does this properly, flushing the file as well.
+    /// This exists because an aggregate device that is never destroyed outlives the process
+    /// that made it — it becomes litter in the user's audio system, visible to every other
+    /// app, and nothing cleans it up. Dropping this actor without stopping it should not
+    /// leave that behind.
+    deinit {
+        if let tap {
+            AppLog.capture.error("the system audio tap was dropped without being stopped; tearing it down")
+            if let ioProcID = tap.ioProcID {
+                AudioDeviceStop(tap.aggregateID, ioProcID)
+                AudioDeviceDestroyIOProcID(tap.aggregateID, ioProcID)
+            }
+            AudioHardwareDestroyAggregateDevice(tap.aggregateID)
+            AudioHardwareDestroyProcessTap(tap.tapID)
+        }
+        watchdogTask?.cancel()
+    }
+
     /// Starts capture into `url` and returns the sample rate the tap reported.
     @discardableResult
     func start(writingTo url: URL) async throws -> Double {

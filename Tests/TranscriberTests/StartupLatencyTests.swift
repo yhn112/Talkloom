@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import XCTest
 
 @testable import Transcriber
@@ -57,8 +58,11 @@ final class StartupLatencyTests: XCTestCase {
     /// engine returns long before the unit delivers anything. Whatever separates the two
     /// paths here is missing from one track of every recording.
     func testTimeToTheFirstSampleOnBothPaths() async throws {
+        // One microphone reused across recordings, the way the app holds it: a
+        // MicrophoneCapture is a long-lived object, and building a fresh one per recording
+        // churns AVAudioEngine lifecycles in a way the framework does not survive.
+        let microphone = MicrophoneCapture()
         for _ in 0..<3 {
-            let microphone = MicrophoneCapture()
             let systemAudio = SystemAudioCapture()
             let directory = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appending(path: "Latency-\(UUID().uuidString)")
@@ -91,6 +95,61 @@ final class StartupLatencyTests: XCTestCase {
                 "    gap between the two tracks: \(String(format: "%.3f", HostTime.seconds(from: systemFirst, to: microphoneFirst))) s"
             )
         }
+    }
+
+    /// Is the default input device running for anyone on this machine?
+    ///
+    /// This is what lights the orange microphone indicator in the menu bar. Voice
+    /// processing is deliberately left enabled between recordings, and the promise that
+    /// comes with that is checked here rather than taken on trust: a stopped engine must
+    /// release the device even though its unit is still configured.
+    private func inputDeviceIsRunning() -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
+                == noErr
+        else { return false }
+
+        address.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
+        var running: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &running) == noErr else { return false }
+        return running != 0
+    }
+
+    func testTheMicrophoneIsReleasedBetweenRecordings() async throws {
+        let microphone = MicrophoneCapture()
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "Release-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertFalse(inputDeviceIsRunning(), "something was already using the microphone before the test")
+
+        _ = try await microphone.start(writingTo: directory.appending(path: "first.wav"))
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(inputDeviceIsRunning(), "recording should hold the device")
+
+        _ = await microphone.stop()
+        try await Task.sleep(for: .milliseconds(500))
+        // Voice processing stays enabled on the node; the device must not stay held.
+        XCTAssertFalse(
+            inputDeviceIsRunning(),
+            "the microphone is still in use after stopping — the indicator would stay lit while idle"
+        )
+
+        // And it can still be started again afterwards.
+        _ = try await microphone.start(writingTo: directory.appending(path: "second.wav"))
+        try await Task.sleep(for: .milliseconds(500))
+        let stopped = await microphone.stop()
+        let second = try XCTUnwrap(stopped)
+        XCTAssertGreaterThan(second.frameCount, 0)
     }
 
     /// The same engine started twice: if the cost is one-off per process rather than per

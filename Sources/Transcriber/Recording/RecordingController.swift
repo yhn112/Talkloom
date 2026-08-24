@@ -27,8 +27,13 @@ final class RecordingController {
     private let microphone = MicrophoneCapture()
     private let systemAudio = SystemAudioCapture()
 
-    init(permissions: PermissionManager = PermissionManager()) {
+    /// Where sessions are created. Overridden only by tests, which must not scatter
+    /// recordings through the user's Application Support folder.
+    private let sessionRoot: URL?
+
+    init(permissions: PermissionManager = PermissionManager(), sessionRoot: URL? = nil) {
         self.permissions = permissions
+        self.sessionRoot = sessionRoot
     }
 
     var isRecording: Bool {
@@ -64,7 +69,7 @@ final class RecordingController {
         }
 
         do {
-            let session = try RecordingSession.create()
+            let session = try RecordingSession.create(root: sessionRoot)
             lastMicrophoneTrack = nil
             lastSystemTrack = nil
             warning = nil
