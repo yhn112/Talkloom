@@ -1,17 +1,16 @@
+import Foundation
+import TranscriberCore
 import XCTest
 
-@testable import Transcriber
-
 final class RecordingManifestTests: XCTestCase {
-    private func summary(
+    private func report(
         _ label: String,
         hostTime: UInt64?,
         frameCount: Int = 48_000,
         content: TrackContent = .local
-    ) -> TrackRecorder.Summary {
-        TrackRecorder.Summary(
-            label: label,
-            url: URL(fileURLWithPath: "/tmp/\(label).wav"),
+    ) -> TrackReport {
+        TrackReport(
+            file: "\(label).wav",
             content: content,
             sampleRate: 48_000,
             frameCount: frameCount,
@@ -27,9 +26,9 @@ final class RecordingManifestTests: XCTestCase {
         let second = HostTime.hostTicks(forSeconds: 0.75)
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 0),
-            summaries: [
-                summary("mic", hostTime: 1_000 + second),
-                summary("system", hostTime: 1_000),
+            reports: [
+                report("mic", hostTime: 1_000 + second),
+                report("system", hostTime: 1_000),
             ]
         )
         XCTAssertEqual(manifest.status, .completed)
@@ -45,7 +44,7 @@ final class RecordingManifestTests: XCTestCase {
     func testATrackThatNeverStartedGetsNoOffset() throws {
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 0),
-            summaries: [summary("mic", hostTime: 5_000), summary("system", hostTime: nil)]
+            reports: [report("mic", hostTime: 5_000), report("system", hostTime: nil)]
         )
         XCTAssertEqual(manifest.status, .completed)
 
@@ -62,7 +61,7 @@ final class RecordingManifestTests: XCTestCase {
 
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            summaries: [summary("mic", hostTime: 1_000), summary("system", hostTime: 1_000)],
+            reports: [report("mic", hostTime: 1_000), report("system", hostTime: 1_000)],
             failure: "capture stopped"
         )
         XCTAssertEqual(manifest.status, .failed)
@@ -85,7 +84,7 @@ final class RecordingManifestTests: XCTestCase {
 
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            summaries: [summary("mic", hostTime: 1_000, content: .mixed)],
+            reports: [report("mic", hostTime: 1_000, content: .mixed)],
             warning: "the system audio tap did not start"
         )
         try manifest.write(to: directory)
@@ -103,9 +102,9 @@ final class RecordingManifestTests: XCTestCase {
     func testEachCapturePathDeclaresWhoIsOnItsTrack() throws {
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 0),
-            summaries: [
-                summary("mic", hostTime: 1_000, content: .local),
-                summary("system", hostTime: 1_000, content: .remote),
+            reports: [
+                report("mic", hostTime: 1_000, content: .local),
+                report("system", hostTime: 1_000, content: .remote),
             ]
         )
 

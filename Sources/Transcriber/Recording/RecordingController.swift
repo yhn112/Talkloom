@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TranscriberCore
 
 protocol MicrophoneCapturing: Sendable {
     func begin(writingTo url: URL, voiceProcessing: Bool) async throws
@@ -237,7 +238,7 @@ final class RecordingController {
         do {
             try RecordingManifest(
                 startedAt: session.startedAt,
-                completions: completions,
+                reports: completions.map(\.report),
                 failure: failure,
                 warning: warning
             )

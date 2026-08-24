@@ -1,8 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
-
-@testable import Transcriber
+import TranscriberCore
 
 /// The first suite written against Swift Testing rather than XCTest.
 ///

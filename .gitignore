@@ -9,6 +9,8 @@ xcuserdata/
 # SwiftPM
 /.build/
 /.swiftpm/
+Packages/*/.build/
+Packages/*/.swiftpm/
 
 # Build products
 /build/

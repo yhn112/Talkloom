@@ -5,7 +5,7 @@
 /// recording, because the merge step assigns speakers from the file a segment came from:
 /// `local` is "me", `remote` is "everyone else", and `mixed` is neither, so it may not be
 /// labelled at all without separating the voices first.
-enum TrackContent: String, Codable, Sendable {
+public enum TrackContent: String, Codable, Sendable {
     /// The microphone with echo cancellation on: this machine's user, and nobody else.
     case local
 

@@ -44,6 +44,13 @@ settings:
       ENABLE_HARDENED_RUNTIME: YES
 
 packages:
+  # The half of the code that needs no microphone and no signed bundle: the WAV writer,
+  # the mach-time conversion, and the session manifest. A local package rather than a
+  # folder in the app target so that `swift test` can run its tests in about a second
+  # without xcodebuild, signing, or a test host. See Packages/TranscriberCore/Package.swift.
+  TranscriberCore:
+    path: Packages/TranscriberCore
+
   # Lock-free cursors for the capture ring buffer. Swift's own `Synchronization.Atomic`
   # would do, but it is macOS 15+, and the deployment floor here is 14.2.
   #
@@ -73,6 +80,7 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: CoreAudio.framework
       - package: Atomics
+      - package: TranscriberCore
 
   TranscriberTests:
     type: bundle.unit-test

@@ -1,4 +1,5 @@
 import Foundation
+import TranscriberCore
 
 /// One meeting's recording: a directory holding the two tracks.
 ///

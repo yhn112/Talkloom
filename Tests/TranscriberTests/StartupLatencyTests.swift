@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import TranscriberCore
 import XCTest
 
 @testable import Transcriber

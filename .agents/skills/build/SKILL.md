@@ -71,6 +71,15 @@ If it reports a formatting failure, `scripts/format.sh` fixes it.
 
 ## Tests
 
+The package first — it is a second, and it covers the WAV writer, the mach-time
+conversion and the manifest:
+
+```bash
+swift test --package-path Packages/TranscriberCore
+```
+
+Then the app's own tests, which need the project, the bundle and its signature:
+
 ```bash
 xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
   -derivedDataPath build test 2>&1 | xcsift -f toon -w -E

@@ -36,10 +36,12 @@ ok
 step format
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-cp -R Sources Tests "$scratch/"
+rsync -a --exclude=.build Sources Tests Packages "$scratch/"
 xcrun swift-format format --configuration .swift-format --parallel --in-place \
-    --recursive "$scratch/Sources" "$scratch/Tests"
-if unformatted=$(diff -rq Sources "$scratch/Sources" && diff -rq Tests "$scratch/Tests"); then
+    --recursive "$scratch/Sources" "$scratch/Tests" "$scratch/Packages"
+if unformatted=$(for tree in Sources Tests Packages; do
+    diff -rq --exclude=.build "$tree" "$scratch/$tree"
+done); then
     ok
 else
     fail
@@ -48,7 +50,19 @@ else
     exit 1
 fi
 
-# 3. Build and tests. Device tests live in their own scheme and are skipped here: they need
+# 3. The package's own tests. They need no signing, no test host and no hardware, so they
+# run first and in about a second: a broken WAV header should not cost a full app build to
+# discover.
+step package
+if summary=$(swift test --package-path Packages/TranscriberCore 2>&1 | xcsift -f toon -w -E); then
+    ok "$(echo "$summary" | awk '/passed_tests:/ {print $2" tests"}')"
+else
+    fail
+    echo "$summary" | sed 's/^/  /'
+    exit 1
+fi
+
+# 4. Build and tests. Device tests live in their own scheme and are skipped here: they need
 # a microphone and make audible noise. xcsift collapses xcodebuild's output — measured at
 # 98 kB for a green run against 127 bytes — while -E preserves the failure exit code, which
 # the pipeline would otherwise swallow.

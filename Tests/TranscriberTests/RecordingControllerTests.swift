@@ -1,3 +1,4 @@
+import TranscriberCore
 import XCTest
 
 @testable import Transcriber

@@ -10,26 +10,26 @@ import Foundation
 /// Not thread-safe and deliberately not `Sendable`: it belongs to the single consumer that
 /// drains a ring buffer. Nothing here may be called from an audio callback — it does file
 /// I/O on every call.
-protocol PCMWriting: AnyObject {
+public protocol PCMWriting: AnyObject {
     var frameCount: Int { get }
     func append(_ samples: UnsafeBufferPointer<Int16>) throws
     func finish() throws
 }
 
-final class WAVWriter: PCMWriting {
+public final class WAVWriter: PCMWriting {
     /// Byte length of a canonical PCM WAV header: RIFF chunk, `fmt ` chunk, `data` header.
     private static let headerByteCount = 44
 
-    let url: URL
-    let sampleRate: Int
-    let channelCount: Int
+    public let url: URL
+    public let sampleRate: Int
+    public let channelCount: Int
 
     /// Frames written so far. Duration in seconds is this divided by the sample rate.
-    private(set) var frameCount = 0
+    public private(set) var frameCount = 0
 
     private var handle: FileHandle?
 
-    init(url: URL, sampleRate: Int, channelCount: Int) throws {
+    public init(url: URL, sampleRate: Int, channelCount: Int) throws {
         precondition(sampleRate > 0 && channelCount > 0)
         self.url = url
         self.sampleRate = sampleRate
@@ -49,7 +49,7 @@ final class WAVWriter: PCMWriting {
     ///
     /// WAV stores samples little-endian, which is what `Int16` already is on arm64, so the
     /// buffer goes to disk unchanged.
-    func append(_ samples: UnsafeBufferPointer<Int16>) throws {
+    public func append(_ samples: UnsafeBufferPointer<Int16>) throws {
         guard let handle, !samples.isEmpty else { return }
         try handle.write(contentsOf: Data(buffer: samples))
         frameCount += samples.count / channelCount
@@ -59,7 +59,7 @@ final class WAVWriter: PCMWriting {
     ///
     /// Until this runs the file declares zero-length audio, so every player and every
     /// decoder reads it as empty. Call it on every exit path, including failures.
-    func finish() throws {
+    public func finish() throws {
         guard let handle else { return }
         let dataByteCount = frameCount * channelCount * MemoryLayout<Int16>.size
         try handle.seek(toOffset: 0)

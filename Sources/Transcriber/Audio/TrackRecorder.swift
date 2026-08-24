@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import TranscriberCore
 
 /// One recorded track, end to end: the handle an audio callback writes into, and the
 /// consumer that drains it and writes the file.

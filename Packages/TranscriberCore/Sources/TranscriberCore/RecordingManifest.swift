@@ -7,43 +7,43 @@ import Foundation
 /// merging them by timestamp needs the offset, and the offset is not in the audio. Keeping
 /// it here rather than only in the log means the recording explains itself to whatever
 /// reads it next, including the analysis scripts.
-struct RecordingManifest: Codable, Equatable, Sendable {
-    enum Status: String, Codable, Sendable {
+public struct RecordingManifest: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable {
         case recording
         case completed
         case failed
     }
 
-    struct Track: Codable, Equatable, Sendable {
-        let file: String
-        let sampleRate: Double
-        let frameCount: Int
-        let peakAmplitude: Float
-        let droppedSampleCount: Int
-        let failure: String?
+    public struct Track: Codable, Equatable, Sendable {
+        public let file: String
+        public let sampleRate: Double
+        public let frameCount: Int
+        public let peakAmplitude: Float
+        public let droppedSampleCount: Int
+        public let failure: String?
 
         /// Seconds from the recording's origin — the earliest first sample of any track —
         /// to this track's first sample. `nil` means the track never received a sample.
-        let startOffset: TimeInterval?
+        public let startOffset: TimeInterval?
 
         /// Who is on the track. `nil` only in manifests written before the field existed:
         /// for those recordings it is genuinely unknown, and guessing from the file name
         /// would reintroduce exactly the claim this field was added to stop making.
-        let content: TrackContent?
+        public let content: TrackContent?
     }
 
-    let startedAt: Date
-    let status: Status
-    let tracks: [Track]
-    let failure: String?
+    public let startedAt: Date
+    public let status: Status
+    public let tracks: [Track]
+    public let failure: String?
 
     /// Why a session that completed is not the session that was asked for — the system tap
     /// failing to start, and the microphone therefore recording both sides without echo
     /// cancellation. It lived only in the menu bar until now, which meant it was gone by the
     /// next recording, while the file it describes stayed on disk.
-    let warning: String?
+    public let warning: String?
 
-    static let fileName = "session.json"
+    public static let fileName = "session.json"
 
     private init(
         startedAt: Date,
@@ -62,7 +62,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     /// Written as soon as the session directory is reserved. If the process dies before
     /// finalization, the directory remains self-identifying rather than looking like a
     /// successful session that mysteriously has no manifest.
-    static func recording(startedAt: Date) -> RecordingManifest {
+    public static func recording(startedAt: Date) -> RecordingManifest {
         RecordingManifest(
             startedAt: startedAt,
             status: .recording,
@@ -75,23 +75,9 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     /// Builds a manifest from what the recorders reported, putting the tracks on a common
     /// timeline. Tracks that never received a sample carry no offset because there is
     /// nothing to align.
-    init(
+    public init(
         startedAt: Date,
-        summaries: [TrackRecorder.Summary],
-        failure: String? = nil,
-        warning: String? = nil
-    ) {
-        self.init(
-            startedAt: startedAt,
-            completions: summaries.map { TrackRecorder.Completion(summary: $0, failure: nil) },
-            failure: failure,
-            warning: warning
-        )
-    }
-
-    init(
-        startedAt: Date,
-        completions: [TrackRecorder.Completion],
+        reports: [TrackReport],
         failure: String? = nil,
         warning: String? = nil
     ) {
@@ -99,29 +85,27 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         self.failure = failure
         self.warning = warning
         status = failure == nil ? .completed : .failed
-        let summaries = completions.map(\.summary)
-        let origin = summaries.compactMap(\.firstSampleHostTime).min()
-        tracks = completions.map { completion in
-            let summary = completion.summary
-            let offset = summary.firstSampleHostTime.flatMap { first in
+        let origin = reports.compactMap(\.firstSampleHostTime).min()
+        tracks = reports.map { report in
+            let offset = report.firstSampleHostTime.flatMap { first in
                 origin.map { HostTime.seconds(from: $0, to: first) }
             }
             return Track(
-                file: summary.url.lastPathComponent,
-                sampleRate: summary.sampleRate,
-                frameCount: summary.frameCount,
-                peakAmplitude: summary.peakAmplitude,
-                droppedSampleCount: summary.droppedSampleCount,
-                failure: completion.failure?.localizedDescription,
+                file: report.file,
+                sampleRate: report.sampleRate,
+                frameCount: report.frameCount,
+                peakAmplitude: report.peakAmplitude,
+                droppedSampleCount: report.droppedSampleCount,
+                failure: report.failure,
                 startOffset: offset,
-                content: summary.content
+                content: report.content
             )
         }
     }
 
     /// Manifests written before the status field existed describe finalized sessions.
     /// Defaulting only that legacy shape keeps existing recordings readable.
-    init(from decoder: any Decoder) throws {
+    public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         startedAt = try container.decode(Date.self, forKey: .startedAt)
         tracks = try container.decode([Track].self, forKey: .tracks)
@@ -132,7 +116,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
             ?? (failure == nil ? .completed : .failed)
     }
 
-    func write(to directory: URL) throws {
+    public func write(to directory: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

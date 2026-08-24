@@ -205,6 +205,23 @@ compiler warnings. UI is `@MainActor`, capture runs on a dedicated actor or thre
 on its own actor. `@unchecked Sendable` is acceptable only for the ring buffer, and only
 with a comment stating what makes it safe.
 
+### Where code goes
+
+Two places, and the line between them is testability, not tidiness.
+
+`Packages/TranscriberCore` holds what can be verified without hardware: the WAV writer,
+the mach-time conversion, `TrackContent`, and the session manifest. Its tests run with
+`swift test --package-path Packages/TranscriberCore` in about a second — no xcodebuild, no
+signing, no test host — so anything that can live there should.
+
+The app target holds everything that touches CoreAudio, AVFoundation, TCC or the UI, and
+the ring buffer with it: an audio callback calls `AudioRingBuffer.write` directly, Swift
+does not inline across module boundaries by default, and the real-time path is not where a
+module boundary should be paid for.
+
+The dependency only points one way. `TranscriberCore` must not learn what a
+`TrackRecorder` is; the app translates at the seam (`TrackReport`).
+
 ### Tests
 
 New tests are written with Swift Testing — `@Suite`, `@Test`, `#expect`, `#require`. The
