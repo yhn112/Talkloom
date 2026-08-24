@@ -154,8 +154,11 @@ changes, whether or not the tap was affected.
 Watching the tap's own output covers every cause and costs nothing. With auto-start off the
 tap delivers frames continuously, silence included, so a stream that produces nothing for a
 couple of seconds has stopped. That is the signal this project reports to the recording
-controller. The controller finalizes both tracks and shows a failure; it does not append a
-replacement stream to the same WAV because that would hide the gap from the timeline.
+controller. The current controller finalizes both tracks and shows a failure because its
+manifest cannot represent discontinuities yet. That is interim behavior, not the Stage 1
+continuity policy; D4 and D23 in `docs/technical-debt.md` own the missing span-and-gap
+representation. Appending a replacement stream without it would still be wrong because it
+would hide the gap from the timeline.
 
 ## Call sequence
 

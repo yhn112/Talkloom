@@ -26,9 +26,20 @@ those sources can disagree.
 `interim policy · P0 · reproduced` — Shown by the existing ring-buffer and oversized-block
 tests. A drop now fails the track and stops the session (`TrackRecorder.drain`), so no
 `completed` manifest can describe a compressed timeline; the price is that one dropped
-block ends the session.
-**Exit:** a timeline of spans with their own host-time anchors, so a drop costs a gap
-instead — the same representation D23 needs.
+block ends the session, violating the Stage 1 continuity requirement in `PLAN.md`.
+**Exit:** a timeline of spans with their own host-time anchors locates the drop, the writer
+inserts the exact number of silent frames and continues, and the completed manifest makes
+the gap observable — the same representation D23 needs.
+
+### D23 — a capture-path restart must preserve wall-clock time
+`open · P0 · confirmed fact` — Capture currently stops and finalizes the whole session when
+either path dies, which violates the Stage 1 continuity requirement in `PLAN.md`. A simple
+append after restart is not acceptable because it compresses the timeline; the gap duration
+must be derived from the old and new spans' host-time anchors and recorded in the manifest.
+**Exit:** the manifest represents anchored spans and gaps; restart inserts the corresponding
+native-rate silent frames without stopping the session; retry exhaustion is visible to the
+user; and real-device tests switch the output device and verify both track durations,
+offsets, gap length, and post-restart signal.
 
 ## Simplification
 
@@ -152,15 +163,6 @@ release devices, clean up after failure.
 duplicated across them, and a test-host crash or forced interruption can leave private
 audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives thrown
 errors, plus a documented cleanup command for what a crash leaves behind.
-
-## Deferred by decision
-
-### D23 — seamless recovery after a capture path dies
-`deferred · — · future concern` — Capture stops and finalizes the whole session when either
-path dies. Appending a restarted path first requires either silence padding derived from
-host time, or the span-anchored timeline D4 needs. Until that exists, stopping visibly is
-the correct behaviour, not a shortcut.
-**Exit:** the representation exists and device switches are covered by real-device tests.
 
 ## Intentionally retained complexity
 

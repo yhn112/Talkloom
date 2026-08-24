@@ -81,14 +81,19 @@ changes; the stages below say what each one is, not where the work stands.
   (available since macOS 14.2; the app's own floor is 15.0).
 - Write two files in the device's own format; resampling to 16 kHz happens later, over
   the finished file, never on the audio path.
+- A transient capture-path failure does not end the session. The unaffected track keeps
+  recording, the failed path is rebuilt, and its missing wall-clock interval is explicit
+  in `session.json` and represented by native-rate silence in the master. A path that
+  cannot be restored stays visibly degraded until the user stops recording.
 - Known traps, all of which present as a valid file rather than as an error: Voice
   Processing IO reports nine channels where the device has one; automatic ducking quiets
   the other participants unless `voiceProcessingOtherAudioDuckingConfiguration` disables
   it; an aggregate device that contains the output device as well as the tap delivers two
   streams and the tap is not the first; a tap that has died goes on producing a valid,
   silent file. See `docs/system-audio-capture.md` for the measurements.
-- ✅ Done when: after a call, two clean tracks exist on disk, verified by measured peak
-  amplitude on each — not by file size.
+- ✅ Done when: after a call, two aligned tracks exist on disk, verified by measured peak
+  amplitude on each — not by file size — and a controlled capture-path interruption leaves
+  an explicit gap followed by signal instead of ending or compressing the session.
 
 ### Stage 2 — offline transcription (MVP)
 - whisper.cpp with Metal, or WhisperKit; a `large-v3`-class model, which is what Russian

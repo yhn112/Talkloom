@@ -55,7 +55,7 @@ Subject in the imperative, English, under 72 characters, no trailing period, pre
 with the area touched — `capture`, `asr`, `ui`, `storage`, `build`, `docs`:
 
 ```
-capture: stop the session when the system tap stalls
+capture: preserve the timeline when the system tap restarts
 ```
 
 One logical change per commit. Reformatting, renames, and behaviour changes go in

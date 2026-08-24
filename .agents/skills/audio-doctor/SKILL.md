@@ -34,8 +34,10 @@ means the bundle signature changed.
 **Only the system track is empty.** The process tap was created but never attached to the
 aggregate device, or it is attached to a process that isn't producing audio. Confirm audio
 was actually playing during the recording. A device change can collapse the aggregate;
-until manifests represent discontinuities, the app must stop the whole session visibly
-rather than append a rebuilt tap to the same WAV.
+the current build stops the session as the documented D23 interim behavior. A completed D23
+implementation must instead leave an explicit manifest gap, matching silence in the master,
+and signal after the rebuilt tap starts; a simple append produces a compressed timeline and
+is still a failure.
 
 **Only the microphone track is empty.** Typically Voice Processing IO delivered a format
 or buffer layout other than the one the callback path accepts — a multi-channel stream
