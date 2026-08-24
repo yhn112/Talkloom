@@ -30,6 +30,7 @@ final class RecordingManifestTests: XCTestCase {
                 summary("system", hostTime: 1_000),
             ]
         )
+        XCTAssertEqual(manifest.status, .completed)
 
         let mic = try XCTUnwrap(manifest.tracks.first { $0.file == "mic.wav" })
         let system = try XCTUnwrap(manifest.tracks.first { $0.file == "system.wav" })
@@ -44,6 +45,7 @@ final class RecordingManifestTests: XCTestCase {
             startedAt: Date(timeIntervalSince1970: 0),
             summaries: [summary("mic", hostTime: 5_000), summary("system", hostTime: nil)]
         )
+        XCTAssertEqual(manifest.status, .completed)
 
         let system = try XCTUnwrap(manifest.tracks.first { $0.file == "system.wav" })
         XCTAssertNil(system.startOffset)
@@ -61,11 +63,46 @@ final class RecordingManifestTests: XCTestCase {
             summaries: [summary("mic", hostTime: 1_000), summary("system", hostTime: 1_000)],
             failure: "capture stopped"
         )
+        XCTAssertEqual(manifest.status, .failed)
         try manifest.write(to: directory)
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let data = try Data(contentsOf: directory.appending(path: RecordingManifest.fileName))
         XCTAssertEqual(try decoder.decode(RecordingManifest.self, from: data), manifest)
+    }
+
+    func testLegacyManifestWithoutStatusDecodesAsCompleted() throws {
+        let json = """
+        {
+          "startedAt": "2023-11-14T22:13:20Z",
+          "tracks": []
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let manifest = try decoder.decode(RecordingManifest.self, from: Data(json.utf8))
+
+        XCTAssertEqual(manifest.status, .completed)
+        XCTAssertEqual(manifest.tracks, [])
+        XCTAssertNil(manifest.failure)
+    }
+
+    func testLegacyFailedManifestWithoutStatusDecodesAsFailed() throws {
+        let json = """
+        {
+          "startedAt": "2023-11-14T22:13:20Z",
+          "tracks": [],
+          "failure": "capture stopped"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let manifest = try decoder.decode(RecordingManifest.self, from: Data(json.utf8))
+
+        XCTAssertEqual(manifest.status, .failed)
+        XCTAssertEqual(manifest.failure, "capture stopped")
     }
 }

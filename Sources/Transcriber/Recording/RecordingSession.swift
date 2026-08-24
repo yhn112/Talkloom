@@ -59,9 +59,18 @@ struct RecordingSession: Equatable, Sendable {
                 // Creating the leaf without intermediates is the atomic reservation. Two
                 // starts in the same second must never open the same mic.wav/system.wav.
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
-                return RecordingSession(directory: directory, startedAt: startedAt)
             } catch let error as CocoaError where error.code == .fileWriteFileExists {
                 suffix += 1
+                continue
+            }
+
+            let session = RecordingSession(directory: directory, startedAt: startedAt)
+            do {
+                try RecordingManifest.recording(startedAt: startedAt).write(to: directory)
+                return session
+            } catch {
+                try? fileManager.removeItem(at: directory)
+                throw error
             }
         }
     }

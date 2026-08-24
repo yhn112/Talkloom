@@ -22,9 +22,10 @@ offline transcription is built on top of capture. It is not a second product roa
 
 ### P0 — persist a truthful timeline
 
-- Write a session skeleton early and checkpoint first-sample timestamps. Repairing a WAV
-  header after a crash cannot reconstruct track alignment if all timing existed only in
-  memory.
+- Checkpoint first-sample timestamps while recording. A session skeleton is now written as
+  soon as its directory is reserved, so a crash is distinguishable from successful
+  completion, but repairing a WAV header still cannot reconstruct track alignment if all
+  timing existed only in memory.
 
 ## Simplification opportunities
 
@@ -139,6 +140,8 @@ anchors, then cover device switches with real-device tests.
   session-level failures are preserved in `session.json`.
 - Unexpected system-audio buffer layouts fail the track instead of accumulating as an
   unreported diagnostic count.
+- Session creation writes an in-progress manifest before capture starts; normal stop
+  replaces it atomically with `completed` or `failed`, and legacy manifests remain readable.
 
 ## Intentionally retained complexity
 

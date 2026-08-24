@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a finished recording consists of, written next to the tracks as `session.json`.
+/// What a recording consists of, written next to the tracks as `session.json`.
 ///
 /// The tracks do not start together — the microphone's echo canceller takes the best part
 /// of a second to produce its first sample, while the tap produces one immediately — so
@@ -8,6 +8,12 @@ import Foundation
 /// it here rather than only in the log means the recording explains itself to whatever
 /// reads it next, including the analysis scripts.
 struct RecordingManifest: Codable, Equatable, Sendable {
+    enum Status: String, Codable, Sendable {
+        case recording
+        case completed
+        case failed
+    }
+
     struct Track: Codable, Equatable, Sendable {
         let file: String
         let sampleRate: Double
@@ -23,10 +29,25 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     }
 
     let startedAt: Date
+    let status: Status
     let tracks: [Track]
     let failure: String?
 
     static let fileName = "session.json"
+
+    private init(startedAt: Date, status: Status, tracks: [Track], failure: String?) {
+        self.startedAt = startedAt
+        self.status = status
+        self.tracks = tracks
+        self.failure = failure
+    }
+
+    /// Written as soon as the session directory is reserved. If the process dies before
+    /// finalization, the directory remains self-identifying rather than looking like a
+    /// successful session that mysteriously has no manifest.
+    static func recording(startedAt: Date) -> RecordingManifest {
+        RecordingManifest(startedAt: startedAt, status: .recording, tracks: [], failure: nil)
+    }
 
     /// Builds a manifest from what the recorders reported, putting the tracks on a common
     /// timeline. Tracks that never received a sample carry no offset because there is
@@ -50,6 +71,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     ) {
         self.startedAt = startedAt
         self.failure = failure
+        status = failure == nil ? .completed : .failed
         let summaries = completions.map(\.summary)
         let origin = summaries.compactMap(\.firstSampleHostTime).min()
         tracks = completions.map { completion in
@@ -67,6 +89,17 @@ struct RecordingManifest: Codable, Equatable, Sendable {
                 startOffset: offset
             )
         }
+    }
+
+    /// Manifests written before the status field existed describe finalized sessions.
+    /// Defaulting only that legacy shape keeps existing recordings readable.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        tracks = try container.decode([Track].self, forKey: .tracks)
+        failure = try container.decodeIfPresent(String.self, forKey: .failure)
+        status = try container.decodeIfPresent(Status.self, forKey: .status)
+            ?? (failure == nil ? .completed : .failed)
     }
 
     func write(to directory: URL) throws {

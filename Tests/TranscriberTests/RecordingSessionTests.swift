@@ -24,8 +24,9 @@ final class RecordingSessionTests: XCTestCase {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "TranscriberTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        let startedAt = Date(timeIntervalSince1970: 1_756_045_812)
 
-        let session = try RecordingSession.create(root: root)
+        let session = try RecordingSession.create(startedAt: startedAt, root: root)
 
         var isDirectory: ObjCBool = false
         XCTAssertTrue(
@@ -38,6 +39,15 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertNotEqual(session.microphoneTrackURL, session.systemTrackURL)
         XCTAssertEqual(session.microphoneTrackURL.lastPathComponent, "mic.wav")
         XCTAssertEqual(session.systemTrackURL.lastPathComponent, "system.wav")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let manifest = try decoder.decode(RecordingManifest.self, from: data)
+        XCTAssertEqual(manifest.startedAt, session.startedAt)
+        XCTAssertEqual(manifest.status, .recording)
+        XCTAssertEqual(manifest.tracks, [])
+        XCTAssertNil(manifest.failure)
     }
 
     func testTwoSessionsStartedInTheSameSecondUseDifferentDirectories() throws {
