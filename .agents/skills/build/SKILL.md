@@ -3,7 +3,7 @@ name: build
 description: Build, sign, and launch Transcriber.app, run the tests, and read the app's logs. Use after code changes, when a change needs checking in the running app, and when the app won't launch or misbehaves. Do not use to diagnose recording quality — that is audio-doctor.
 ---
 
-# Building and running
+# Building, testing, and running
 
 `.xcodeproj` is a generated artifact in this project. The source of truth is
 `project.yml`, so the cycle always starts with generation, never with opening the project.

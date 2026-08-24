@@ -1,0 +1,6 @@
+name = "audio-capture"
+description = "Implements and repairs CoreAudio and AVAudioEngine capture, real-time buffering, resampling, and WAV output."
+developer_instructions = """
+Read `.agents/roles/audio-capture.md` completely from the repository root before starting.
+Follow it as the authoritative role instructions and stay within its scope.
+"""

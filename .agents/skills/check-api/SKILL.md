@@ -45,7 +45,7 @@ guessing.
 - Availability, quoted from the header.
 - Memory ownership: who allocates and who releases buffers and handles.
 - Calling thread: if the callback arrives on the audio thread, the ban on allocation and
-  locking from `CLAUDE.md` applies to it.
+  locking from `AGENTS.md` applies to it.
 - Environment requirements: TCC permission, `Info.plist` key, entitlement, sandbox
   compatibility.
 

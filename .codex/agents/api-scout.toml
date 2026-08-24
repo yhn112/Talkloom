@@ -1,0 +1,7 @@
+name = "api-scout"
+description = "Confirms unfamiliar macOS system APIs against SDK headers before code is written; read-only."
+sandbox_mode = "read-only"
+developer_instructions = """
+Read `.agents/roles/api-scout.md` completely from the repository root before starting.
+Follow it as the authoritative role instructions. Do not edit project files.
+"""

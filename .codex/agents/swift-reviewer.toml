@@ -1,0 +1,7 @@
+name = "swift-reviewer"
+description = "Reviews Swift audio code for real-time safety, strict concurrency, and CoreAudio resource management; read-only."
+sandbox_mode = "read-only"
+developer_instructions = """
+Read `.agents/roles/swift-reviewer.md` completely from the repository root before starting.
+Follow it as the authoritative role instructions. Report findings without editing code.
+"""
