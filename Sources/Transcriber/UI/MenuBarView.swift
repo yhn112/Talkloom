@@ -50,12 +50,19 @@ struct MenuBarView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if !controller.recoveredSessions.isEmpty {
+                recoveryRow
+            }
+
             Divider()
 
             controls
         }
         .padding(14)
         .frame(width: 280)
+        // The first time the menu is opened, before anything can be recorded over the top
+        // of a session the previous run left half-written. The controller runs it once.
+        .task { await controller.recoverInterruptedSessions() }
     }
 
     private var header: some View {
@@ -68,6 +75,29 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// What the previous run left behind. Worth saying out loud once: the audio came back,
+    /// the alignment between the two tracks did not, and only this line explains why a
+    /// recording the user remembers making now describes itself as interrupted.
+    private var recoveryRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(
+                "Repaired \(controller.recoveredSessions.count) recording(s) a previous run never finished: the audio is readable again, but the two tracks are no longer aligned."
+            )
+            .foregroundStyle(.orange)
+            ForEach(controller.recoveredSessions, id: \.directory) { outcome in
+                Button(outcome.directory.lastPathComponent) {
+                    NSWorkspace.shared.activateFileViewerSelecting([outcome.directory])
+                }
+                .buttonStyle(.link)
+                if let failure = outcome.failure {
+                    Text(failure).foregroundStyle(.red)
+                }
+            }
+        }
+        .font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var controls: some View {

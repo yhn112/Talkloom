@@ -12,24 +12,56 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         case recording
         case completed
         case failed
+
+        /// The app stopped while this session was recording, and the tracks were repaired
+        /// from their length afterwards. Distinct from `failed`, which describes a session
+        /// that ran to its own end and reported why it went wrong: here nothing reported
+        /// anything, and most of what the manifest would normally say is simply unknown.
+        case interrupted
     }
 
     public struct Track: Codable, Equatable, Sendable {
         public let file: String
         public let sampleRate: Double
         public let frameCount: Int
-        public let peakAmplitude: Float
-        public let droppedSampleCount: Int
+
+        /// What the recorder measured, or `nil` when nobody measured it — a recovered track
+        /// has the audio but no measurement, and reading a peak out of the file afterwards
+        /// would be a different claim from the one this field makes.
+        public let peakAmplitude: Float?
+
+        /// Samples the producer had to throw away, or `nil` when it was never recorded.
+        /// Zero means the drop counter was read and stood at zero; `nil` means nothing read
+        /// it, which is what an interrupted session leaves behind.
+        public let droppedSampleCount: Int?
+
         public let failure: String?
 
         /// Seconds from the recording's origin — the earliest first sample of any track —
         /// to this track's first sample. `nil` means the track never received a sample.
         public let startOffset: TimeInterval?
 
-        /// Who is on the track. `nil` only in manifests written before the field existed:
-        /// for those recordings it is genuinely unknown, and guessing from the file name
-        /// would reintroduce exactly the claim this field was added to stop making.
+        /// Who is on the track. `nil` only in manifests written before the field existed,
+        /// and in recovered sessions: for those recordings it is genuinely unknown, and
+        /// guessing from the file name would reintroduce exactly the claim this field was
+        /// added to stop making.
         public let content: TrackContent?
+
+        /// A track found on disk after an interrupted session. Its length comes from the
+        /// file; everything else was never written down, so it stays unknown rather than
+        /// being reconstructed into something that looks measured.
+        static func recovered(file: String, sampleRate: Double, frameCount: Int) -> Track {
+            Track(
+                file: file,
+                sampleRate: sampleRate,
+                frameCount: frameCount,
+                peakAmplitude: nil,
+                droppedSampleCount: nil,
+                failure: nil,
+                startOffset: nil,
+                content: nil
+            )
+        }
     }
 
     public let startedAt: Date
@@ -68,6 +100,22 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
             status: .recording,
             tracks: [],
             failure: nil,
+            warning: nil
+        )
+    }
+
+    /// Replaces the in-progress manifest of a session the app never got to finish.
+    ///
+    /// The tracks are what was found on disk and repaired, not what any recorder reported —
+    /// nothing reported anything. The failure text is what the directory has instead of a
+    /// stop, so whoever reads it later knows why the alignment is missing.
+    static func interrupted(startedAt: Date, tracks: [Track], failure: String) -> RecordingManifest
+    {
+        RecordingManifest(
+            startedAt: startedAt,
+            status: .interrupted,
+            tracks: tracks,
+            failure: failure,
             warning: nil
         )
     }

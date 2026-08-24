@@ -34,14 +34,11 @@ offline transcription is built on top of capture. It is not a second product roa
   timeline made of spans with their own host-time anchors, which is the same representation
   the deferred recovery work below needs; until then the interim policy stands, and the
   price it charges is a session lost to one dropped block.
-- Recover interrupted sessions by manifest status, not only by manifest absence. A
-  recording interrupted by a crash or a kill leaves WAV headers claiming zero bytes, so
-  the tracks read as empty although the samples are on disk. Recovering only sessions
-  that have no `session.json` misses exactly that shape: new sessions write the manifest
-  with `status == recording` before capture begins, so the file is always there. On
-  launch, inspect `recording` manifests first, retaining missing or unreadable manifests
-  as a legacy case; repair WAV sizes from the file length without claiming track
-  alignment that was never checkpointed.
+- Checkpoint first-sample timestamps while recording — see the item above. Recovery now
+  exists (`SessionRecovery`) and deliberately publishes no alignment for the sessions it
+  repairs, because none was ever written down. That is honest, not sufficient: an
+  interrupted meeting comes back as two tracks that cannot be merged by timestamp, which
+  is most of what a transcript needs them for.
 
 ## Simplification opportunities
 
@@ -200,6 +197,17 @@ anchors, then cover device switches with real-device tests.
   session-level failures are preserved in `session.json`.
 - Unexpected system-audio buffer layouts fail the track instead of accumulating as an
   unreported diagnostic count.
+- Interrupted sessions are recovered by manifest status. `SessionRecovery` repairs every
+  directory whose `session.json` says `recording`, keeping a missing or unreadable manifest
+  as the legacy shape, and rewrites each track's header from the file's own length so a
+  killed recording stops reading as an empty file. What it does not do is invent what was
+  never measured: a recovered manifest carries `status == interrupted`, track lengths, and
+  nothing else — no peak, no drop count, no alignment, no track content. `peakAmplitude`
+  and `droppedSampleCount` are therefore optional in the manifest, where `nil` means
+  nobody measured it and `0` means somebody did.
+  Known limitation: recovery assumes one running instance. A second copy of the app
+  recording right now would have its live session repaired underneath it; the app is a
+  menu-bar singleton, so this is an assumption rather than a reproduced defect.
 - Manifest finalization participates in the controller's result. A session whose
   `session.json` could not be replaced reports a failure naming its directory instead of
   entering `idle`, so finalized tracks are never presented as a clean stop while the only

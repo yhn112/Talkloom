@@ -84,12 +84,17 @@ def main() -> int:
 
     print(f"{args.session}")
     for entry in manifest["tracks"]:
+        # A recovered session knows how long each track is and nothing else: it was
+        # repaired from the files after a crash, and nobody measured a peak, a drop count
+        # or an offset. Print that as unknown rather than inventing a zero.
+        peak, offset = entry.get("peakAmplitude"), entry.get("startOffset")
+        dropped = entry.get("droppedSampleCount")
         print(
             f"    {entry['file']:12} {entry['sampleRate']:.0f} Hz  "
             f"{entry['frameCount'] / entry['sampleRate']:6.2f} s  "
-            f"peak {fmt(dbfs(entry['peakAmplitude']))} dBFS  "
-            f"starts at +{entry['startOffset']:.3f} s  "
-            f"dropped {entry['droppedSampleCount']}"
+            f"peak {fmt(dbfs(peak)) if peak is not None else '     ?'} dBFS  "
+            f"starts at {f'+{offset:.3f} s' if offset is not None else 'unknown '} "
+            f"dropped {dropped if dropped is not None else 'unknown'}"
         )
 
     window = max(1, int(rate * WINDOW_SECONDS))

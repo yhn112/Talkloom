@@ -115,6 +115,56 @@ struct RecordingControllerTests {
         return try decoder.decode(RecordingManifest.self, from: data)
     }
 
+    /// A session directory in the shape a killed process leaves: an in-progress manifest,
+    /// and a track whose header still declares zero bytes.
+    @discardableResult
+    private func interruptedSession(_ name: String, in root: URL) throws -> URL {
+        let directory = root.appending(path: name)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try RecordingManifest.recording(startedAt: Date(timeIntervalSince1970: 1_000))
+            .write(to: directory)
+
+        let url = directory.appending(path: "mic.wav")
+        let writer = try WAVWriter(url: url, sampleRate: 48_000, channelCount: 1)
+        try [Int16](repeating: 4_096, count: 1_000).withUnsafeBufferPointer { try writer.append($0) }
+        try writer.finish()
+        var bytes = try Data(contentsOf: url)
+        bytes.replaceSubrange(4..<8, with: Data(repeating: 0, count: 4))
+        bytes.replaceSubrange(40..<44, with: Data(repeating: 0, count: 4))
+        try bytes.write(to: url)
+        return directory
+    }
+
+    /// The wiring, not the repair — what recovery does to a directory belongs to the
+    /// package tests. What matters here is that it happens, and that it happens once: it
+    /// describes the previous run, and re-running it over this run's sessions would be a
+    /// second app deciding what a live recording is.
+    @Test("recordings a previous run never finished are repaired once")
+    func interruptedSessionsAreRepairedOnce() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try interruptedSession("2026-01-01_10-00-00", in: root)
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: FakeSystemAudio()
+        )
+
+        await controller.recoverInterruptedSessions()
+
+        #expect(controller.recoveredSessions.count == 1)
+        #expect(controller.recoveredSessions.first?.repairedTracks == ["mic.wav"])
+        #expect(controller.recoveredSessions.first?.failure == nil)
+
+        try interruptedSession("2026-01-02_10-00-00", in: root)
+        await controller.recoverInterruptedSessions()
+
+        #expect(
+            controller.recoveredSessions.map(\.directory.lastPathComponent)
+                == ["2026-01-01_10-00-00"])
+    }
+
     @Test("a microphone start failure rolls back system capture")
     func microphoneStartFailureRollsBackSystemCapture() async throws {
         let root = try temporaryRoot()
@@ -261,7 +311,9 @@ struct RecordingControllerTests {
         // atomically, so the temporary file it writes alongside cannot be created either.
         let path = session.directory.path
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path) }
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        }
 
         await controller.stop()
 

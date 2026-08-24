@@ -48,6 +48,10 @@ final class RecordingController {
     private(set) var lastSystemTrack: TrackRecorder.Summary?
     private(set) var warning: String?
 
+    /// Sessions the previous run never finished, repaired on the way in.
+    private(set) var recoveredSessions: [SessionRecovery.Outcome] = []
+    private var hasRecovered = false
+
     let permissions: PermissionManager
     private let microphone: any MicrophoneCapturing
     private let systemAudio: any SystemAudioCapturing
@@ -91,6 +95,37 @@ final class RecordingController {
     var errorMessage: String? {
         if case .failed(let message) = state { return message }
         return nil
+    }
+
+    /// Repairs whatever the previous run left half-written.
+    ///
+    /// A session killed mid-recording leaves WAV headers still claiming zero bytes, so a
+    /// full meeting reads as an empty file everywhere. The repair is keyed on the manifest
+    /// saying `recording`, runs once per launch, and touches nothing this run created.
+    ///
+    /// It runs when the menu first opens rather than from `init`: the menu is the only way
+    /// to reach this app at all, so nothing can be recorded before it, and a recording that
+    /// waits a few seconds longer to become readable costs nothing.
+    func recoverInterruptedSessions() async {
+        guard !hasRecovered else { return }
+        hasRecovered = true
+        guard let root = sessionRoot ?? (try? RecordingSession.defaultRoot()) else { return }
+
+        // Off the main actor: this reads every session directory the user has ever recorded.
+        let outcomes = await Task.detached { SessionRecovery.recoverInterrupted(in: root) }.value
+        guard !outcomes.isEmpty else { return }
+
+        recoveredSessions = outcomes
+        for outcome in outcomes {
+            AppLog.app.notice(
+                "repaired the interrupted session \(outcome.directory.lastPathComponent, privacy: .public): \(outcome.repairedTracks.joined(separator: ", "), privacy: .public)"
+            )
+            if let failure = outcome.failure {
+                AppLog.app.error(
+                    "\(outcome.directory.lastPathComponent, privacy: .public) could not be fully recovered: \(failure, privacy: .public)"
+                )
+            }
+        }
     }
 
     func toggle() async {
@@ -225,7 +260,9 @@ final class RecordingController {
                 "The tracks were saved in \(session.directory.lastPathComponent), but the session could not be described on disk: \(manifestFailure)"
             )
         case (let trackFailure?, let manifestFailure?):
-            fail("\(trackFailure) The session could not be described on disk either: \(manifestFailure)")
+            fail(
+                "\(trackFailure) The session could not be described on disk either: \(manifestFailure)"
+            )
         }
     }
 
