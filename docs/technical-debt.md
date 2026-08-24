@@ -1,238 +1,203 @@
 # Technical debt and simplification opportunities
 
-This document records current design and implementation debt that should be resolved before
-offline transcription is built on top of capture. It is not a second product roadmap:
-`PLAN.md` owns product stages, while this file owns concrete cleanup and correctness work.
+Concrete design and correctness work to resolve before offline transcription is built on
+top of capture. `PLAN.md` owns product stages; this file owns the work items. "What to do
+next" is the current stage in `PLAN.md` plus the P0 items here.
 
-## Priorities
+Each item has a stable identifier so a commit can name what it resolves, and one metadata
+line: `status · severity · evidence`. Evidence uses the categories in `AGENTS.md` —
+confirmed fact, reproduced behavior, code risk, future concern. P0 is reserved for a
+reproduced failure, a violated invariant, or a path that loses user data.
 
-### P0 — make capture health explicit
+Resolved items are deleted rather than archived. Git holds that history better, and a
+list of finished work buries the open items beside it. Identifiers are never reused.
 
-- Do not use successful tap creation as the safety condition for microphone AEC. The
-  permission UI now remains unverified until capture observes a non-silent signal, but AEC
-  still has to be chosen before that evidence exists. A silent tap can therefore remove the
-  remote side from the only usable track. The signed controller device test reproduced
-  this exact ambiguity: two runs produced system peaks of 0.3291 and 0.0000 respectively,
-  while both files had the expected duration and reported no dropped frames. The public SDK
-  has no AudioCapture authorization or tap-health query; resolving this requires a
-  data-preserving capture policy, not another permission check.
-- Represent one active session and its two track states in one place. The current state is
-  spread across `RecordingController.State`, `warning`, permission state, last summaries,
-  and the capture actors' optional recorders, and those sources can disagree.
+## P0 — capture health
 
-### P0 — persist a truthful timeline
+### D1 — AEC is chosen before capture health can be known
+`open · P0 · reproduced` — The signed controller device test produced system peaks of
+0.3291 and 0.0000 across two runs, both files having the expected duration and reporting
+no dropped frames. Successful tap creation is therefore not evidence that the tap carries
+audio, yet it is what selects microphone AEC, and a silent tap plus AEC removes the remote
+side from the only usable track. The public SDK offers no AudioCapture authorization query
+and no tap-health query (confirmed fact).
+**Exit:** a data-preserving capture policy that does not infer health from creation — not
+another permission check.
 
-- Checkpoint first-sample timestamps while recording. A session skeleton is now written as
-  soon as its directory is reserved, so a crash is distinguishable from successful
-  completion, but repairing a WAV header still cannot reconstruct track alignment if all
-  timing existed only in memory.
-- Preserve the position of every dropped block. **Interim policy in place**: a drop now
-  fails the track and stops the session (`TrackRecorder.drain`), so no `completed` manifest
-  can describe a compressed timeline any more, and nothing from the pass that noticed
-  reaches disk. What remains is the real fix — a manifest that can say *where* the gap was,
-  so a drop costs a gap rather than the rest of the meeting. The exit criterion is a
-  timeline made of spans with their own host-time anchors, which is the same representation
-  the deferred recovery work below needs; until then the interim policy stands, and the
-  price it charges is a session lost to one dropped block.
-- Checkpoint first-sample timestamps while recording — see the item above. Recovery now
-  exists (`SessionRecovery`) and deliberately publishes no alignment for the sessions it
-  repairs, because none was ever written down. That is honest, not sufficient: an
-  interrupted meeting comes back as two tracks that cannot be merged by timestamp, which
-  is most of what a transcript needs them for.
+### D2 — one session's state has five representations
+`open · P0 · code risk` — State is spread across `RecordingController.State`, `warning`,
+permission state, the last summaries, and the capture actors' optional recorders, and
+those sources can disagree.
+**Exit:** one active session and its two track states represented in one place.
 
-## Simplification opportunities
+## P0 — a truthful timeline
 
-### Remove unused surface area
+### D3 — first-sample timestamps are never checkpointed while recording
+`open · P0 · reproduced` — `SessionRecovery` repairs an interrupted session and publishes
+no alignment, because none was ever written down. Honest, and not sufficient: the recovered
+meeting comes back as two tracks that cannot be merged by timestamp, which is most of what
+a transcript needs them for.
+**Exit:** each track's first-sample host time reaches disk while recording, not only at
+finalization.
 
-- Make capture `start()` methods return only data a caller actually consumes. Their current
-  format/sample-rate return values are ignored by production code and duplicate the final
-  summary.
+### D4 — a dropped block costs the rest of the meeting
+`interim policy · P0 · reproduced` — Shown by the existing ring-buffer and oversized-block
+tests. A drop now fails the track and stops the session (`TrackRecorder.drain`), so no
+`completed` manifest can describe a compressed timeline; the price is that one dropped
+block ends the session.
+**Exit:** a timeline of spans with their own host-time anchors, so a drop costs a gap
+instead — the same representation D23 needs.
 
-### Give CoreAudio resources one owner
+## Simplification
 
-Tap, aggregate-device and IOProc cleanup is repeated in normal stop, `deinit`, and initial
-rollback. Some error paths already omit part of the cleanup, and all teardown status values
-are discarded.
+### D5 — capture `start()` returns values nobody consumes
+`open · P2 · code risk` — The format and sample-rate return values are ignored by
+production code and duplicate the final summary. **Exit:** return only what a caller uses.
 
-One concrete leak occurs after `createTap()` succeeds but before the recorder is installed:
-if `TrackRecorder` cannot create its WAV writer, the local tap handle is neither destroyed
-nor stored in `self.tap`, so `stop()` and `deinit` cannot reach it. Teardown calls also forget
-the resource IDs even when an `AudioDeviceDestroyIOProcID` or aggregate/tap destroy call
-fails, leaving no retry or useful diagnosis.
+### D6 — CoreAudio resources have no single owner
+`open · P1 · code risk` — Tap, aggregate-device and IOProc cleanup is repeated in normal
+stop, `deinit`, and initial rollback; some error paths omit part of it and every teardown
+status is discarded. One concrete leak: after `createTap()` succeeds but before the
+recorder is installed, a `TrackRecorder` that cannot create its WAV writer leaves the local
+tap handle neither destroyed nor stored in `self.tap`, so neither `stop()` nor `deinit` can
+reach it. Teardown also forgets resource IDs when a destroy call fails, leaving nothing to
+retry or diagnose.
+**Exit:** one resource owner that acquires IDs step by step, destroys them in reverse
+order, logs teardown failures, and stays responsible until cleanup succeeds — replacing the
+duplicated branches rather than wrapping them.
 
-Use one small resource owner that acquires IDs step by step, destroys acquired resources in
-reverse order, logs teardown failures, and remains responsible until cleanup succeeds or
-the process exits. This should replace the duplicated teardown branches rather than wrap
-them in another abstraction layer.
+### D7 — `TrackInput` carries five concerns and a second unchecked escape
+`open · P1 · code risk` — It combines two source APIs, interleaved and deinterleaved
+layouts, generic multichannel averaging, timestamp diagnostics and the ring-buffer handoff,
+and it is `@unchecked Sendable`, which `AGENTS.md` allows only for the ring buffer.
+**Exit:** the tap path is a validated Float32 copy path, the microphone has an explicit
+measured channel policy, and no generic mixer runs in a real-time callback.
 
-### Narrow `TrackInput`
+### D8 — track health is interpreted in four places
+`open · P1 · code risk` — Silence, clipping and near-clipping decisions are made in the
+recorder, the capture actors, controller logs and the UI. Separately, a single peak
+threshold cannot establish that a long recording contains speech.
+**Exit:** track health represented once, on a duration-aware measure such as windowed
+activity, and permission state no longer inferred from it.
 
-`TrackInput` currently combines two source APIs, interleaved and deinterleaved layouts,
-generic multichannel averaging, timestamp diagnostics and the ring-buffer handoff. It is
-also a second `@unchecked Sendable` type despite the repository rule allowing that escape
-hatch only for the ring buffer.
+## Assumptions not yet encoded
 
-The system tap is requested as mono and should need a validated Float32 copy path. The
-microphone needs an explicit, measured channel-selection or downmix policy. Narrowing those
-contracts is preferable to a generic mixer running in every real-time callback.
+Premises the code relies on that no test or header confirms. Each becomes a defect the
+first time a machine disagrees.
 
-### Consolidate track health
+### D9 — the tap's format is assumed, not validated
+`open · P1 · code risk` — Cast to Float32 without checking `mFormatID`, format flags or
+bytes per frame; measured as packed Float32 on one machine and treated as a platform
+guarantee. **Exit:** validate, or fail the track explicitly.
 
-Silence, clipping and near-clipping decisions are interpreted in the recorder, capture
-actors, controller logs and UI. Represent them once as track health/status data. A single
-peak threshold is not sufficient to establish that a long recording contains speech; use
-windowed activity or another duration-aware measure before treating a track as healthy or
-using it to infer permission state.
+### D10 — exactly one `AudioBuffer` is assumed
+`open · P1 · code risk` — Every other layout is dropped, on an observation specific to the
+tap-only aggregate tested so far. **Exit:** a validated layout contract or an explicit
+failure.
 
-## Assumptions that must be validated or encoded
+### D11 — microphone channels are averaged equally
+`open · P1 · code risk` — Device diagnostics prove only that channel zero carries signal,
+not that every reported channel carries the same signal. **Exit:** a measured
+channel-selection or downmix policy.
 
-- The process tap is cast to Float32 without validating `mFormatID`, format flags and bytes
-  per frame. It was measured as packed Float32 on one machine, but the implementation
-  treats that measurement as a platform guarantee.
-- The system path requires exactly one `AudioBuffer` and drops every other layout. The
-  one-buffer observation is specific to the tap-only aggregate tested so far.
-- Microphone channels are averaged equally. Existing device diagnostics prove only that
-  channel zero contains signal, not that every reported channel contains the same signal.
-- `TrackInput.maximumFrameCount == 16_384` is a fixed limit not derived from the device's
-  maximum slice size. A larger callback is discarded whole.
-- The watchdog assumes that `tapAutoStart == false` produces frames continuously on every
-  supported macOS version and device, and that two seconds without accepted samples means
-  the tap is dead.
-- Capture actors rely on `RecordingController` to serialize lifecycle calls. Both start a
-  producer, then suspend while starting the recorder drain, and only afterwards publish the
-  recorder as active. A direct `stop()` during that suspension sees no recorder and returns,
-  while a second direct `start()` also passes the idle guard. Either encode
-  `idle`/`starting`/`running`/`stopping` inside each actor or make controller-only ownership a
-  contract that the type boundary enforces.
-- A mic-only fallback with AEC disabled assumes remote speech is audible through speakers.
-  With headphones, the remote side is absent from the microphone track. The track is now
-  labelled `mixed` in `session.json` instead of passing for `me`, so the merge step can no
-  longer attribute it to the user; how such a session should be transcribed — and whether
-  the user should be warned before recording without the tap at all — is still open.
-- Sample rates are rounded from `Double` to an integer WAV header while the unrounded value
-  remains in the summary. Either validate integral rates or use one canonical integer rate.
+### D12 — `maximumFrameCount == 16_384` is a fixed limit
+`open · P2 · code risk` — Not derived from the device's maximum slice size, and a larger
+callback is discarded whole. **Exit:** derive it, or reject the device at start.
 
-## Diagnostic-tooling reproducibility
+### D13 — the watchdog assumes continuous delivery
+`open · P2 · code risk` — It assumes `tapAutoStart == false` yields frames continuously on
+every supported macOS version and device, and that two seconds without accepted samples
+means the tap is dead. **Exit:** confirmed against a header, or measured across device
+changes.
 
-- `track_compare.py` rejects a session when its two master tracks have different sample
-  rates, even though recording each device at its own native rate is a project invariant.
-  Compare offline-derived tracks at one common rate, or resample inside the diagnostic while
-  preserving each track's manifest offset. Cover the result with synthetic tracks whose
-  rates differ and whose known alignment must survive conversion.
-- The Python tools import `numpy`, `soundfile`, and `jiwer`, but no checked-in dependency
-  manifest or lock file can recreate the repository's `.venv`. Add a `pyproject.toml` and
-  lock file, then include a hardware-free smoke check for the three scripts in the normal
-  gate. The virtual environment remains a derived local artifact.
+### D14 — capture actors rely on the controller to serialize lifecycle calls
+`open · P1 · code risk` — Both start a producer, suspend while starting the recorder drain,
+and only then publish the recorder as active. A direct `stop()` during that suspension sees
+no recorder and returns; a second direct `start()` also passes the idle guard.
+**Exit:** `idle`/`starting`/`running`/`stopping` encoded inside each actor, or
+controller-only ownership enforced by the type boundary.
 
-## Test-structure cleanup
+### D15 — a mic-only fallback assumes the remote side is audible through speakers
+`open · P1 · code risk` — With headphones it is not. The track is labelled `mixed` in
+`session.json`, so the merge step cannot attribute it to the user, but how such a session
+should be transcribed — and whether to warn before recording without the tap at all —
+remains open. **Exit:** a product decision, then the behaviour it implies.
 
-Several opt-in device diagnostics are measurement experiments rather than regression tests:
+### D16 — sample rates are rounded in the header but not in the summary
+`open · P2 · code risk` — The WAV header takes an integer while the unrounded `Double`
+stays in the summary. **Exit:** validate integral rates, or use one canonical integer rate.
 
-- startup timing tests mostly print timings without acceptance assertions;
-- the voice-processing layout test prints per-channel measurements but proves only that
-  channel zero is non-silent, and its real-time tap takes an `NSLock`, which can perturb the
-  callback behavior it is supposed to measure;
-- the ducking test exhaustively plays all hardware-dependent configurations;
-- `voiceProcessingSuppressesTheSpeakers` compares peak amplitude with and without
-  cancellation, and peak across a four-second recording is not a measure of cancellation.
-  The canceller converges over the first seconds of a session, so the peak reports where
-  the loud syllables happened to fall: the same configuration measured 0.0057, 0.0064,
-  0.0078, 0.0835 and 0.6105 across five runs, and a single-engine variant of the same test
-  produced 0.0076, 0.0588, 0.2783 and 1.0000. The test passes today by luck. Measure a
-  settled RMS over a window that starts after convergence, the way the ducking table in
-  `system-audio-capture.md` already does.
+### D17 — recovery assumes a single running instance
+`open · P2 · code risk` — `SessionRecovery` repairs every directory whose `session.json`
+says `recording`, so a second copy of the app recording right now would have its live
+session repaired underneath it. The app is a menu-bar singleton, which makes this an
+assumption rather than a reproduced defect. **Exit:** recovery skips a session another
+instance owns, or single-instance is enforced rather than assumed.
 
-Move exploratory measurements into a manual diagnostics or benchmark target. Keep the
-device scheme focused on short end-to-end invariants: both paths start, contain meaningful
-signal, share a timeline, finalize correctly, release devices, and clean up after failure.
+## Tooling and tests
 
-The device tests also repeat temporary-directory and `say`/`afplay` process management.
-Provide one test harness whose cleanup is `defer`-based and resilient to thrown errors. Test
-host crashes and forced interruption can still leave private audio behind, so document and
-provide an explicit cleanup command for those artifacts.
+### D18 — `track_compare.py` rejects native-rate masters
+`open · P1 · code risk` — It refuses a session whose two masters have different sample
+rates, although recording each device at its own native rate is a project invariant: the
+diagnostic rejects exactly the recordings the project produces.
+**Exit:** compare offline-derived tracks at one common rate, or resample inside the
+diagnostic while preserving each track's manifest offset, covered by synthetic tracks whose
+rates differ and whose known alignment must survive conversion.
 
-## Documentation ownership
+### D19 — the Python tooling has no smoke check in the gate
+`open · P2 · code risk` — `pyproject.toml` and `uv.lock` now record `numpy`, `soundfile`
+and `jiwer` so `.venv` can be rebuilt with `uv sync` (`3d9a42a`), and `scripts/doctor.sh`
+reports whether the three import. Nothing runs the scripts themselves in
+`scripts/check.sh`, so one broken by an edit is discovered only when someone needs it.
+**Exit:** a hardware-free smoke check for the three scripts in the gate. `.venv` stays a
+derived local artifact.
 
-**Status: mostly resolved.** Which file owns what is now a rule in `AGENTS.md` ("One
-fact, one place"), and its mechanical half is enforced by `scripts/check_docs.py` inside
-`scripts/check.sh`: no version literals in `.agents/`, no dangling paths, no roster drift
-between the two clients, and the bundle identifier checked against `project.yml`.
+### D20 — device diagnostics are experiments wearing the shape of tests
+`open · P1 · reproduced` — Startup timing tests mostly print without asserting; the
+voice-processing layout test proves only that channel zero is non-silent, and its real-time
+tap takes an `NSLock`, which can perturb the callback behaviour it measures; the ducking
+test exhaustively plays every hardware-dependent configuration. Worst,
+`voiceProcessingSuppressesTheSpeakers` compares peak amplitude with and without
+cancellation, and peak across four seconds does not measure cancellation — the canceller
+converges over the first seconds, so peak reports where the loud syllables fell. The same
+configuration measured 0.0057, 0.0064, 0.0078, 0.0835 and 0.6105 across five runs, and a
+single-engine variant produced 0.0076, 0.0588, 0.2783 and 1.0000. **It passes by luck.**
+**Exit:** exploratory measurements move to a manual diagnostics or benchmark target;
+cancellation is measured as settled RMS over a window starting after convergence, as the
+ducking table in `docs/system-audio-capture.md` already does; the device scheme keeps only
+short end-to-end invariants — both paths start, carry signal, share a timeline, finalize,
+release devices, clean up after failure.
 
-Reproduced evidence for the original item: `a1e9e68` raised the deployment floor to
-macOS 15 and updated `project.yml`, `PLAN.md` and `docs/system-audio-capture.md`, leaving
-the old floor in `.agents/roles/api-scout.md` and `.agents/skills/check-api/SKILL.md`.
-Both are corrected and the check now fails on a reintroduced version literal.
+### D21 — device tests repeat their own scaffolding
+`open · P2 · code risk` — Temporary-directory and `say`/`afplay` process management is
+duplicated across them, and a test-host crash or forced interruption can leave private
+audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives thrown
+errors, plus a documented cleanup command for what a crash leaves behind.
 
-A second instance, found and fixed the same way: `PLAN.md` carried the WAV-header
-recovery as a Stage 1 work item while the P0 above already owned it, and the two had
-diverged — the plan prescribed recovering sessions without a `session.json`, which the
-current code never produces. `PLAN.md` now states which stage is current and leaves work
-items to this file.
+## Documentation
 
-Remaining, not blocking: the claim that capture writes 16 kHz files or uses a live
-converter no longer appears anywhere, but the resampling argument is still stated twice
-inside `AGENTS.md` itself (the decision, and again as an example under "Ask the user to
-make the sound"). Exit criterion: one statement of the measurement in `AGENTS.md`, cited
-rather than repeated elsewhere. The check cannot see this — prose duplication inside one
-file is a human review job.
+### D22 — the resampling measurement is stated twice inside `AGENTS.md`
+`open · P2 · confirmed fact` — Once as the decision under "Audio format and separate
+tracks", again as an example under "Ask the user to make the sound".
+`scripts/check_docs.py` cannot see it: duplication inside one file is a review job.
+**Exit:** one statement of the measurement, cited rather than repeated.
 
-## Deferred recovery
+## Deferred by decision
 
-Capture currently stops and finalizes the whole session when either path dies. Seamless
-recovery is intentionally deferred: before appending a restarted path, define either
-silence padding derived from host time or a timeline made of spans with their own host-time
-anchors, then cover device switches with real-device tests.
-
-## Resolved during the Stage 1 audit
-
-- Recording startup is transactional, and explicit `starting`/`stopping` states reject
-  overlapping UI operations.
-- Capture actors report runtime failures to the controller; neither actor silently rebuilds
-  or restarts into an existing WAV.
-- Session directories are atomically reserved, so starts in the same second cannot truncate
-  each other's tracks.
-- The unused ScreenCaptureKit linkage and dead recorder/manifest properties were removed.
-- WAV append and finalization failures propagate through capture stop to the controller.
-  Partial summaries describe only successfully written frames, and both track-level and
-  session-level failures are preserved in `session.json`.
-- Unexpected system-audio buffer layouts fail the track instead of accumulating as an
-  unreported diagnostic count.
-- Interrupted sessions are recovered by manifest status. `SessionRecovery` repairs every
-  directory whose `session.json` says `recording`, keeping a missing or unreadable manifest
-  as the legacy shape, and rewrites each track's header from the file's own length so a
-  killed recording stops reading as an empty file. What it does not do is invent what was
-  never measured: a recovered manifest carries `status == interrupted`, track lengths, and
-  nothing else — no peak, no drop count, no alignment, no track content. `peakAmplitude`
-  and `droppedSampleCount` are therefore optional in the manifest, where `nil` means
-  nobody measured it and `0` means somebody did.
-  Known limitation: recovery assumes one running instance. A second copy of the app
-  recording right now would have its live session repaired underneath it; the app is a
-  menu-bar singleton, so this is an assumption rather than a reproduced defect.
-- Manifest finalization participates in the controller's result. A session whose
-  `session.json` could not be replaced reports a failure naming its directory instead of
-  entering `idle`, so finalized tracks are never presented as a clean stop while the only
-  description of them still says `recording`.
-- A failure the drain observes stops the session while the meeting is still being recorded,
-  rather than surfacing when the user presses stop. `TrackRecorder.observeFailures` hands
-  the first failure to the capture path that owns the track, which reports it through the
-  same runtime-failure route as a dead tap, so both tracks are stopped, finalized, and
-  described in `session.json`. A failure that happens before the controller arms monitoring
-  is delivered on subscription, because the drain starts when capture does.
-- Session creation writes an in-progress manifest before capture starts; normal stop
-  replaces it atomically with `completed` or `failed` when the final write succeeds, and
-  legacy manifests remain readable. Failure of that final write is still active debt above.
-- Every track declares who is on it — `local`, `remote` or `mixed` — and a session that
-  fell back to the microphone alone carries the reason in `session.json` instead of only in
-  the menu bar, which was gone by the next recording.
+### D23 — seamless recovery after a capture path dies
+`deferred · — · future concern` — Capture stops and finalizes the whole session when either
+path dies. Appending a restarted path first requires either silence padding derived from
+host time, or the span-anchored timeline D4 needs. Until that exists, stopping visibly is
+the correct behaviour, not a shortcut.
+**Exit:** the representation exists and device switches are covered by real-device tests.
 
 ## Intentionally retained complexity
 
-The following pieces are justified by current requirements and should not be simplified
-away without new evidence:
+Justified by current requirements. Do not simplify these away without new evidence:
 
 - separate microphone and system tracks;
 - a preallocated SPSC ring buffer between a real-time callback and disk I/O;
 - hardware host time for cross-track alignment;
 - native-rate masters and offline resampling;
-- explicit peak/drop measurements that make silent or discontinuous capture observable;
+- explicit peak and drop measurements that make silent or discontinuous capture observable;
 - deterministic WAV writing, provided errors and crash recovery are handled explicitly.
