@@ -151,11 +151,16 @@ actor MicrophoneCapture {
         return format
     }
 
-    /// Arms device-change monitoring once the controller is ready to handle a failure.
-    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
-        guard recorder != nil else { return }
+    /// Arms device-change and track monitoring once the controller is ready to handle a
+    /// failure. A track that cannot write is as fatal to the session as a device that went
+    /// away, and neither is visible from the audio callback.
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async {
+        guard let recorder else { return }
         runtimeFailureHandler = handler
         observeConfigurationChanges()
+        await recorder.observeFailures { [weak self] failure in
+            Task { await self?.reportRuntimeFailure(failure.localizedDescription) }
+        }
     }
 
     /// Stops capture and closes the file.

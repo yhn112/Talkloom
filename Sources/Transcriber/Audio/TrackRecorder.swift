@@ -84,12 +84,14 @@ actor TrackRecorder {
     private var drainTask: Task<Void, Never>?
     private var isFinished = false
     private var firstFailure: Failure?
+    private var failureHandler: (@Sendable (Failure) -> Void)?
 
-    enum Failure: Error, LocalizedError, Sendable {
+    enum Failure: Error, LocalizedError, Sendable, Equatable {
         case unsupportedSourceFormat(sampleRate: Double)
         case writeFailed(label: String, reason: String)
         case finalizationFailed(label: String, reason: String)
         case unexpectedBufferLayout(label: String, blockCount: Int)
+        case samplesDropped(label: String, sampleCount: Int)
 
         var errorDescription: String? {
             switch self {
@@ -101,6 +103,8 @@ actor TrackRecorder {
                 "The \(label) track could not finalize its WAV header: \(reason)"
             case .unexpectedBufferLayout(let label, let blockCount):
                 "The \(label) track received \(blockCount) unsupported audio block(s)."
+            case .samplesDropped(let label, let sampleCount):
+                "The \(label) track lost \(sampleCount) sample(s), leaving a gap in the recording."
             }
         }
     }
@@ -143,6 +147,23 @@ actor TrackRecorder {
         }
     }
 
+    /// Reports the first failure the drain observes, instead of keeping it until `finish()`.
+    ///
+    /// Everything this actor can fail at happens while the meeting is still being recorded,
+    /// and the drain is the only part that sees it: after a failure it stops writing, the
+    /// producer goes on filling the ring, and the file stops growing behind a UI that still
+    /// says "recording". Whoever owns the session hears about it here and can stop.
+    ///
+    /// A failure that already happened is delivered on subscription, because the drain
+    /// starts as soon as capture does — before the session is ready to be told about one.
+    func observeFailures(_ handler: @escaping @Sendable (Failure) -> Void) {
+        // A closed track has nothing left to report: its completion already carries the
+        // failure, and holding the handler would only keep the subscriber alive.
+        guard !isFinished else { return }
+        failureHandler = handler
+        if let firstFailure { deliver(firstFailure) }
+    }
+
     /// Stops draining, flushes whatever the producer left behind, and closes the file.
     ///
     /// The caller must have stopped the producer first: anything written after this point
@@ -156,6 +177,8 @@ actor TrackRecorder {
 
         if firstFailure == nil { drain() }
         isFinished = true
+        // Nobody is listening once the track is closed; the completion carries the failure.
+        failureHandler = nil
         do {
             try writer.finish()
         } catch {
@@ -181,6 +204,24 @@ actor TrackRecorder {
 
     private func drain() {
         guard !isFinished, firstFailure == nil else { return }
+
+        // A drop is a hole in the timeline, not merely some missing samples. Whatever the
+        // producer manages to hand over afterwards is written directly behind what came
+        // before it, which shortens this track and shifts everything in it against the other
+        // one — and the result is a plausible file that no longer says when anything was
+        // said. `session.json` cannot describe a gap yet (see `docs/technical-debt.md`), so
+        // the track fails here and the session stops.
+        //
+        // Nothing is written in the pass that notices, deliberately: a drop happens when the
+        // ring is full, and the ring may already hold samples the producer wrote after it.
+        // Writing those is exactly the compression this refuses, and no counter says where
+        // the boundary is. What is on disk stops at the last pass that was still true.
+        let dropped = input.droppedSampleCount
+        if dropped > 0 {
+            recordFailure(.samplesDropped(label: label, sampleCount: dropped))
+            return
+        }
+
         let capacity = floatScratch.count
 
         while true {
@@ -217,6 +258,15 @@ actor TrackRecorder {
         guard firstFailure == nil else { return }
         firstFailure = failure
         AppLog.capture.error("\(failure.localizedDescription, privacy: .public)")
+        deliver(failure)
+    }
+
+    /// Hands the failure to the observer exactly once. Whoever hears it stops the session,
+    /// so a second report would arrive at a session that is already stopping.
+    private func deliver(_ failure: Failure) {
+        let handler = failureHandler
+        failureHandler = nil
+        handler?(failure)
     }
 
     /// Float32 in `[-1, 1]` to Int16.

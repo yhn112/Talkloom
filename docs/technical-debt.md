@@ -19,13 +19,6 @@ offline transcription is built on top of capture. It is not a second product roa
 - Represent one active session and its two track states in one place. The current state is
   spread across `RecordingController.State`, `warning`, permission state, last summaries,
   and the capture actors' optional recorders, and those sources can disagree.
-- Surface disk-write failure while recording, not only when the user stops. After
-  `PCMWriting.append` throws, `TrackRecorder` records the error and permanently stops
-  draining, but neither capture actor nor the controller is notified until `finish()`.
-  The producer continues, the UI still says that recording is active, and the remainder of
-  the meeting is lost. The existing failing-writer test confirms this contract at the
-  recorder seam; the exit criterion is an immediate session failure that stops and
-  finalizes both tracks.
 
 ### P0 — persist a truthful timeline
 
@@ -33,13 +26,14 @@ offline transcription is built on top of capture. It is not a second product roa
   soon as its directory is reserved, so a crash is distinguishable from successful
   completion, but repairing a WAV header still cannot reconstruct track alignment if all
   timing existed only in memory.
-- Preserve the position of every dropped block. The ring buffer currently counts discarded
-  samples, then the recorder writes the next accepted block directly after the previous
-  one. That removes time from one track, shifts everything after the drop relative to the
-  other track, and still produces a `completed` manifest containing only an aggregate drop
-  count. Existing ring-buffer and oversized-block tests reproduce the drop path. Until the
-  manifest can represent timed spans, any drop must fail and stop the whole session rather
-  than leave a compressed timeline behind.
+- Preserve the position of every dropped block. **Interim policy in place**: a drop now
+  fails the track and stops the session (`TrackRecorder.drain`), so no `completed` manifest
+  can describe a compressed timeline any more, and nothing from the pass that noticed
+  reaches disk. What remains is the real fix — a manifest that can say *where* the gap was,
+  so a drop costs a gap rather than the rest of the meeting. The exit criterion is a
+  timeline made of spans with their own host-time anchors, which is the same representation
+  the deferred recovery work below needs; until then the interim policy stands, and the
+  price it charges is a session lost to one dropped block.
 - Treat failure to replace the in-progress manifest as a session failure visible to the
   user. `RecordingController.writeManifest` currently logs the error and returns, after
   which the controller enters `idle`; the WAV files can therefore be finalized while the
@@ -212,6 +206,12 @@ anchors, then cover device switches with real-device tests.
   session-level failures are preserved in `session.json`.
 - Unexpected system-audio buffer layouts fail the track instead of accumulating as an
   unreported diagnostic count.
+- A failure the drain observes stops the session while the meeting is still being recorded,
+  rather than surfacing when the user presses stop. `TrackRecorder.observeFailures` hands
+  the first failure to the capture path that owns the track, which reports it through the
+  same runtime-failure route as a dead tap, so both tracks are stopped, finalized, and
+  described in `session.json`. A failure that happens before the controller arms monitoring
+  is delivered on subscription, because the drain starts when capture does.
 - Session creation writes an in-progress manifest before capture starts; normal stop
   replaces it atomically with `completed` or `failed` when the final write succeeds, and
   legacy manifests remain readable. Failure of that final write is still active debt above.

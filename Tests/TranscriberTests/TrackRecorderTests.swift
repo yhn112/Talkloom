@@ -202,6 +202,70 @@ final class TrackRecorderTests {
         #expect(completion.failure?.localizedDescription.contains("WAV header") == true)
     }
 
+    /// The first failure the drain sees, delivered the way a capture path receives it.
+    private func firstReportedFailure(from recorder: TrackRecorder) async -> TrackRecorder.Failure {
+        await withCheckedContinuation {
+            (continuation: CheckedContinuation<TrackRecorder.Failure, Never>) in
+            Task {
+                await recorder.observeFailures { continuation.resume(returning: $0) }
+                await recorder.start()
+            }
+        }
+    }
+
+    /// A write failure belongs to the session while it is still running, not to `finish()`.
+    /// Waiting for stop means the file quietly stopped growing behind a UI that still says
+    /// "recording", and the rest of the meeting is gone before anyone is told.
+    @Test("a write failure is reported without waiting for the session to stop")
+    func aWriteFailureIsReportedWhileRecording() async throws {
+        let recorder = try TrackRecorder(
+            label: "mic",
+            url: directory.appending(path: "reported.wav"),
+            sampleRate: 48_000,
+            content: .local,
+            writer: FailingWriter(.append)
+        )
+        [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+
+        let failure = await firstReportedFailure(from: recorder)
+
+        #expect(failure.localizedDescription.contains("could not write audio"))
+        _ = await recorder.finish()
+    }
+
+    /// A drop is not a rounding error in the length. Whatever arrives afterwards is written
+    /// directly behind what came before, so this track shortens and shifts against the
+    /// other one, and `session.json` cannot yet say where the gap was. The track fails
+    /// instead, and nothing from the pass that noticed reaches disk.
+    @Test("dropped samples fail the track instead of compressing its timeline")
+    func droppedSamplesFailTheTrack() async throws {
+        // 8 kHz gives four seconds of ring in 32 768 samples, so one oversized block
+        // overflows it without having to stall the consumer.
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "dropped.wav"),
+            sampleRate: 8_000,
+            content: .remote
+        )
+        [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+        let overflowed = [Float](repeating: 0.5, count: 40_000).withUnsafeBufferPointer {
+            recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+        #expect(!overflowed)
+
+        let failure = await firstReportedFailure(from: recorder)
+        let completion = await recorder.finish()
+
+        #expect(failure == .samplesDropped(label: "system", sampleCount: 40_000))
+        #expect(completion.failure == .samplesDropped(label: "system", sampleCount: 40_000))
+        #expect(completion.summary.droppedSampleCount == 40_000)
+        #expect(completion.summary.frameCount == 0)
+    }
+
     /// The producer's downmix. Whatever the device hands over, one averaged channel comes
     /// out, and the amplitude survives — a halved track is the quiet-remote-party complaint.
     @Test(

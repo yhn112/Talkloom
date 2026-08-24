@@ -136,11 +136,16 @@ actor SystemAudioCapture {
         return sampleRate
     }
 
-    /// Arms the watchdog once the controller is ready to stop the complete session.
-    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
-        guard recorder != nil else { return }
+    /// Arms the watchdog and track monitoring once the controller is ready to stop the
+    /// complete session. The watchdog sees a tap that stopped delivering; only the track
+    /// itself sees a track that stopped being written.
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async {
+        guard let recorder else { return }
         runtimeFailureHandler = handler
         startWatchdog()
+        await recorder.observeFailures { [weak self] failure in
+            Task { await self?.reportRuntimeFailure(failure.localizedDescription) }
+        }
     }
 
     /// Stops capture and closes the file.
