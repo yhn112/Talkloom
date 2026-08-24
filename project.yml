@@ -61,7 +61,6 @@ targets:
     dependencies:
       - sdk: AVFoundation.framework
       - sdk: CoreAudio.framework
-      - sdk: ScreenCaptureKit.framework
       - package: Atomics
 
   TranscriberTests:

@@ -19,7 +19,6 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         /// to this track's first sample. Zero for whichever track started first.
         let startOffset: TimeInterval
 
-        var duration: TimeInterval { Double(frameCount) / sampleRate }
     }
 
     let startedAt: Date

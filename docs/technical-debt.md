@@ -50,10 +50,6 @@ The remaining lifecycle work is:
 
 ### Remove unused surface area
 
-- Remove the unused `ScreenCaptureKit.framework` dependency until an actual fallback is
-  planned and implemented.
-- Remove unused `MicrophoneCapture.isRunning`, `SystemAudioCapture.isRunning`,
-  `TrackRecorder.currentPeak`, and `RecordingManifest.Track.duration` members.
 - Make capture `start()` methods return only data a caller actually consumes. Their current
   format/sample-rate return values are ignored by production code and duplicate the final
   summary.

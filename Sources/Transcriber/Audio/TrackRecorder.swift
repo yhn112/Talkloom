@@ -144,9 +144,6 @@ actor TrackRecorder {
         )
     }
 
-    /// Peak so far, for a level meter while recording.
-    var currentPeak: Float { peak }
-
     private func drain() {
         guard !isFinished else { return }
         let capacity = floatScratch.count
