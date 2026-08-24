@@ -74,8 +74,9 @@ changes; the stages below say what each one is, not where the work stands.
 - Verify that CoreAudio process taps avoid the Screen Recording prompt entirely.
 
 ### Stage 1 — audio capture
-- Microphone via `AVAudioEngine` with Voice Processing IO, so speaker output doesn't
-  echo back into the mic track and duplicate every line.
+- Microphone via `AVAudioEngine`; Voice Processing IO removes speaker echo only after the
+  system track passes an active signal probe, with a mixed microphone fallback when it
+  does not.
 - System audio via `AudioHardwareCreateProcessTap` plus an aggregate device
   (available since macOS 14.2; the app's own floor is 15.0).
 - Write two files in the device's own format; resampling to 16 kHz happens later, over

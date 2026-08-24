@@ -11,6 +11,7 @@ protocol MicrophoneCapturing: Sendable {
 
 protocol SystemAudioCapturing: Sendable {
     func begin(writingTo url: URL) async throws
+    func verifySignal() async throws -> Bool
     func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async
     func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
     func end() async -> TrackRecorder.Completion?
@@ -158,6 +159,7 @@ final class RecordingController {
 
         var session: RecordingSession?
         var systemStarted = false
+        var systemVerified = false
         do {
             let created = try RecordingSession.create(root: sessionRoot)
             session = created
@@ -173,6 +175,25 @@ final class RecordingController {
                 await monitorSystemFirstSample(for: created)
                 if await finishStartupFailureIfNeeded(for: created) { return }
                 guard state == .starting(created) else { return }
+
+                do {
+                    systemVerified = try await systemAudio.verifySignal()
+                    if systemVerified {
+                        permissions.markSystemAudioWorking()
+                    } else {
+                        warning = Self.unverifiedSystemAudioWarning
+                        AppLog.capture.error(
+                            "system audio capture did not carry the verification probe")
+                    }
+                } catch {
+                    warning =
+                        "\(Self.unverifiedSystemAudioWarning) \(error.localizedDescription)"
+                    AppLog.capture.error(
+                        "system audio verification failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+                if await finishStartupFailureIfNeeded(for: created) { return }
+                guard state == .starting(created) else { return }
             } catch {
                 warning =
                     "Recording the microphone only, with echo cancellation off so the other participants are still captured through the speakers. \(error.localizedDescription)"
@@ -183,7 +204,7 @@ final class RecordingController {
 
             try await microphone.begin(
                 writingTo: created.microphoneTrackURL,
-                voiceProcessing: systemStarted
+                voiceProcessing: systemVerified
             )
             if await finishStartupFailureIfNeeded(for: created) { return }
             await monitorMicrophoneFirstSample(for: created)
@@ -218,6 +239,9 @@ final class RecordingController {
         if case .failed = state { return true }
         return false
     }
+
+    private static let unverifiedSystemAudioWarning =
+        "System audio could not be verified, so the microphone was recorded without echo cancellation to preserve both sides of the meeting."
 
     private func monitorMicrophoneFirstSample(for session: RecordingSession) async {
         await microphone.monitorFirstSample { [weak self] hostTime in

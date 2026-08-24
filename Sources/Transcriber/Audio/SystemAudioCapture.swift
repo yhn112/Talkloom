@@ -153,6 +153,22 @@ actor SystemAudioCapture {
         await recorder.observeFirstSample(handler)
     }
 
+    /// Actively proves that this running tap carries output before microphone AEC can erase
+    /// that same output from the only other track.
+    func verifySignal() async throws -> Bool {
+        guard let recorder else { return false }
+        let observation = await recorder.beginSignalObservation(
+            above: SystemAudioProbe.signalThreshold)
+        do {
+            try await SystemAudioProbe.play()
+        } catch {
+            await recorder.cancelSignalObservation(observation)
+            throw error
+        }
+        return await recorder.waitForSignal(
+            observation, timeout: SystemAudioProbe.observationTimeout)
+    }
+
     /// Stops capture and closes the file.
     func stop() async -> TrackRecorder.Completion? {
         guard let recorder else { return nil }

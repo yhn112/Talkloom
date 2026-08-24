@@ -14,16 +14,6 @@ list of finished work buries the open items beside it. Identifiers are never reu
 
 ## P0 — capture health
 
-### D1 — AEC is chosen before capture health can be known
-`open · P0 · reproduced` — The signed controller device test produced system peaks of
-0.3291 and 0.0000 across two runs, both files having the expected duration and reporting
-no dropped frames. Successful tap creation is therefore not evidence that the tap carries
-audio, yet it is what selects microphone AEC, and a silent tap plus AEC removes the remote
-side from the only usable track. The public SDK offers no AudioCapture authorization query
-and no tap-health query (confirmed fact).
-**Exit:** a data-preserving capture policy that does not infer health from creation — not
-another permission check.
-
 ### D2 — one session's state has five representations
 `open · P0 · code risk` — State is spread across `RecordingController.State`, `warning`,
 permission state, the last summaries, and the capture actors' optional recorders, and

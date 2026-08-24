@@ -13,9 +13,9 @@ struct RecordingControllerTests {
         private(set) var beginCount = 0
         private(set) var endCount = 0
 
-        /// Whether echo cancellation was asked for. The controller decides this from
-        /// whether the system tap came up, and it decides what the microphone track
-        /// contains, so it is the part worth pinning down here.
+        /// Whether echo cancellation was asked for. The controller decides this from an
+        /// active system-track probe, and it decides what the microphone track contains,
+        /// so it is the part worth pinning down here.
         private(set) var lastVoiceProcessing: Bool?
         private(set) var hasLiveResource = false
         private var failureHandler: (@Sendable (String) -> Void)?
@@ -60,6 +60,8 @@ struct RecordingControllerTests {
         let endDelay: Duration
         let completion: TrackRecorder.Completion?
         let shouldFailStart: Bool
+        let verifiedSignal: Bool
+        let shouldFailVerification: Bool
         private(set) var beginCount = 0
         private(set) var endCount = 0
         private var failureHandler: (@Sendable (String) -> Void)?
@@ -69,12 +71,16 @@ struct RecordingControllerTests {
             startDelay: Duration = .zero,
             endDelay: Duration = .zero,
             completion: TrackRecorder.Completion? = nil,
-            shouldFailStart: Bool = false
+            shouldFailStart: Bool = false,
+            verifiedSignal: Bool = true,
+            shouldFailVerification: Bool = false
         ) {
             self.startDelay = startDelay
             self.endDelay = endDelay
             self.completion = completion
             self.shouldFailStart = shouldFailStart
+            self.verifiedSignal = verifiedSignal
+            self.shouldFailVerification = shouldFailVerification
         }
 
         func begin(writingTo url: URL) async throws {
@@ -85,6 +91,11 @@ struct RecordingControllerTests {
 
         func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
             failureHandler = handler
+        }
+
+        func verifySignal() throws -> Bool {
+            if shouldFailVerification { throw CocoaError(.fileReadUnknown) }
+            return verifiedSignal
         }
 
         func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) {
@@ -493,22 +504,72 @@ struct RecordingControllerTests {
         #expect(written.tracks.first?.content == .remote)
     }
 
-    @Test("system audio counts as working only once a signal was recorded")
-    func systemAudioIsMarkedWorkingOnlyAfterRecordingSignal() async throws {
+    @Test("a silent verification probe preserves remote audio in the microphone track")
+    func silentVerificationProbePreservesRemoteAudioInMicrophoneTrack() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let system = FakeSystemAudio(
+            completion: systemCompletion(at: root.appending(path: "system.wav")),
+            verifiedSignal: false
+        )
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+
+        await controller.start()
+        let session = try #require(controller.currentSession)
+        #expect(await microphone.lastVoiceProcessing == false)
+        #expect(controller.warning != nil)
+
+        await controller.stop()
+        #expect(await system.endCount == 1, "an unverified system path is still finalized")
+        let written = try manifest(in: session)
+        #expect(written.warning == controller.warning)
+    }
+
+    @Test("a failed verification probe preserves remote audio in the microphone track")
+    func failedVerificationProbePreservesRemoteAudioInMicrophoneTrack() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: FakeSystemAudio(shouldFailVerification: true)
+        )
+
+        await controller.start()
+
+        #expect(await microphone.lastVoiceProcessing == false)
+        #expect(
+            controller.isRecording, "probe failure degrades the recording instead of aborting it")
+        #expect(controller.warning?.contains("could not be verified") == true)
+        await controller.stop()
+    }
+
+    @Test("the active probe marks system audio working before microphone AEC starts")
+    func activeProbeMarksSystemAudioWorkingBeforeMicrophoneAECStarts() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let permissions = PermissionManager(microphone: .granted, systemAudio: .granted)
+        let microphone = FakeMicrophone()
         let controller = RecordingController(
             permissions: permissions,
             sessionRoot: root,
-            microphone: FakeMicrophone(),
+            microphone: microphone,
             systemAudio: FakeSystemAudio(
                 completion: systemCompletion(at: root.appending(path: "system.wav"))
             )
         )
 
         await controller.start()
-        #expect(permissions.systemAudio == .notDetermined)
+        #expect(permissions.systemAudio == .granted)
+        #expect(await microphone.lastVoiceProcessing == true)
 
         await controller.stop()
         #expect(permissions.systemAudio == .granted)
@@ -527,7 +588,8 @@ struct RecordingControllerTests {
                 completion: systemCompletion(
                     at: root.appending(path: "system.wav"),
                     peakAmplitude: 0
-                )
+                ),
+                verifiedSignal: false
             )
         )
 

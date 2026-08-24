@@ -202,6 +202,14 @@ is the foundation of diarization, not an implementation detail: the split alread
 an exact "me" vs "everyone else" for free. Any proposal to fold them into one file is a
 product regression, not an optimization.
 
+Echo cancellation is data-destructive and may start only after the running process tap
+has recorded a known active verification signal. Creating or starting the tap is not
+evidence of health. If verification fails, keep the system path running but record the
+microphone without echo cancellation, mark it as mixed, and warn that the session is
+degraded; that preserves both sides through the speakers instead of erasing the remote
+side from every usable track. The probe and the evidence behind this policy are described
+in `docs/system-audio-capture.md`.
+
 Both tracks must share a common time origin so segments can be merged by timestamp.
 Capture each stream's start time explicitly instead of assuming the two streams start
 together — they do not. The process tap delivers its first sample almost immediately;

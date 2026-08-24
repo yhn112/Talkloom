@@ -233,6 +233,25 @@ result. `kAudioHardwarePropertyProcessInputMute`,
 none reports whether this process may read a tap. Screen-capture preflight checks a
 different, heavier permission and is not a substitute.
 
-The app consequently reports system audio as verified only after it has actually recorded
-a non-silent signal. Until then the state is unknown, not denied. This proves the capture
-path worked on that recording; it is not a persistent authorization query.
+The app therefore starts the tap before the microphone and has the system `afplay` process
+play a short, low-level tone. A separate process matters: capturing the app's own output
+would not prove that TCC lets it read the other processes which carry a remote meeting.
+Only a new above-threshold sample after that probe is armed verifies the path; a lifetime
+peak, successful API calls and arbitrary silence do not. The tone sits above the canonical
+ASR format's passband, so offline conversion filters it out.
+
+Verification gates microphone echo cancellation because cancellation removes speaker
+output from the other available track. If the probe is absent or cannot be played, the
+system capture remains open but the microphone starts without cancellation and is marked
+as mixed. The manifest carries a warning. This is a data-preserving fallback, not a claim
+that permission was denied: headphones can still make a mixed microphone local-only, and
+a later system signal can still make the system file useful.
+
+A single Voice Processing IO client cannot provide processed and raw microphone outputs
+at once: its microphone bus is the processed uplink, input taps observe that output, and
+bypass changes the same path globally. A separate raw client is expressible through the
+public API but is not a portable fallback. In the built-in-device experiment, starting raw
+then AEC left raw at 0.20 s / peak 0.0001 while AEC reached 3.00 s / 0.0065; reversing the
+order produced raw at 4.00 s / 0.0109 and AEC at 3.10 s / 0.7577. The order-dependent
+ownership is why the app uses an active system-path probe rather than two microphone
+clients.

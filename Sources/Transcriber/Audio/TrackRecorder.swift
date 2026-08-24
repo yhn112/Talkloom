@@ -87,6 +87,18 @@ actor TrackRecorder {
     private var failureHandler: (@Sendable (Failure) -> Void)?
     private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
     private var didReportFirstSample = false
+    private var nextSignalObservationID: UInt64 = 0
+    private var signalObservation: SignalObservationState?
+
+    struct SignalObservation: Sendable, Equatable {
+        fileprivate let id: UInt64
+    }
+
+    private struct SignalObservationState {
+        let token: SignalObservation
+        let threshold: Float
+        var didObserve = false
+    }
 
     enum Failure: Error, LocalizedError, Sendable, Equatable {
         case unsupportedSourceFormat(sampleRate: Double)
@@ -177,6 +189,40 @@ actor TrackRecorder {
         reportFirstSampleIfNeeded()
     }
 
+    /// Discards the already-buffered past and arms a new signal observation epoch.
+    func beginSignalObservation(above threshold: Float) -> SignalObservation {
+        drain()
+        nextSignalObservationID &+= 1
+        let token = SignalObservation(id: nextSignalObservationID)
+        signalObservation = SignalObservationState(token: token, threshold: threshold)
+        return token
+    }
+
+    /// Waits for the drain to observe a new sample above the armed verification level.
+    ///
+    /// This runs on the recorder actor, after the real-time callback has copied samples into
+    /// the ring. It is used for an active system-audio probe, not to infer that an arbitrary
+    /// quiet recording lacks permission.
+    func waitForSignal(_ token: SignalObservation, timeout: Duration) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !isFinished, isSignalObservationPending(token), clock.now < deadline {
+            do {
+                try await Task.sleep(for: .milliseconds(10))
+            } catch {
+                break
+            }
+        }
+        let didObserve = signalObservation?.token == token && signalObservation?.didObserve == true
+        cancelSignalObservation(token)
+        return didObserve
+    }
+
+    func cancelSignalObservation(_ token: SignalObservation) {
+        guard signalObservation?.token == token else { return }
+        signalObservation = nil
+    }
+
     /// Stops draining, flushes whatever the producer left behind, and closes the file.
     ///
     /// The caller must have stopped the producer first: anything written after this point
@@ -264,6 +310,10 @@ actor TrackRecorder {
                 return
             }
             peak = max(peak, chunkPeak)
+            if var observation = signalObservation, chunkPeak >= observation.threshold {
+                observation.didObserve = true
+                signalObservation = observation
+            }
 
             // A short read means the ring is empty; the rest arrives on the next pass.
             if read < capacity { return }
@@ -277,6 +327,10 @@ actor TrackRecorder {
         didReportFirstSample = true
         self.firstSampleHandler = nil
         firstSampleHandler(hostTime)
+    }
+
+    private func isSignalObservationPending(_ token: SignalObservation) -> Bool {
+        signalObservation?.token == token && signalObservation?.didObserve == false
     }
 
     private func recordFailure(_ failure: Failure) {

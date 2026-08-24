@@ -234,6 +234,33 @@ final class TrackRecorderTests {
         _ = await recorder.finish()
     }
 
+    @Test("only a signal after the observation begins satisfies the probe")
+    func onlyANewSignalSatisfiesTheProbe() async throws {
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "signal.wav"),
+            sampleRate: 48_000,
+            content: .remote
+        )
+        await recorder.start()
+        [Float](repeating: 0.02, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+
+        let staleObservation = await recorder.beginSignalObservation(above: 0.005)
+        #expect(
+            await !recorder.waitForSignal(staleObservation, timeout: .milliseconds(20)),
+            "a peak from before the observation epoch cannot verify the probe")
+
+        let activeObservation = await recorder.beginSignalObservation(above: 0.005)
+        [Float](repeating: 0.02, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+        #expect(
+            await recorder.waitForSignal(activeObservation, timeout: .milliseconds(200)))
+        _ = await recorder.finish()
+    }
+
     /// A write failure belongs to the session while it is still running, not to `finish()`.
     /// Waiting for stop means the file quietly stopped growing behind a UI that still says
     /// "recording", and the rest of the meeting is gone before anyone is told.
