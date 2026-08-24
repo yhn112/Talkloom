@@ -122,13 +122,12 @@ final class RecordingController {
             lastMicrophoneTrack = nil
             lastSystemTrack = nil
             warning = nil
+            permissions.beginSystemAudioCheck()
 
             do {
                 try await systemAudio.begin(writingTo: created.systemTrackURL)
-                permissions.setSystemAudio(.granted)
                 systemStarted = true
             } catch {
-                permissions.setSystemAudio(.denied)
                 warning =
                     "Recording the microphone only, with echo cancellation off so the other participants are still captured through the speakers. \(error.localizedDescription)"
                 AppLog.capture.error(
@@ -191,6 +190,9 @@ final class RecordingController {
         let tracks = await (microphoneTrack, systemTrack)
         lastMicrophoneTrack = tracks.0?.summary
         lastSystemTrack = tracks.1?.summary
+        if let system = lastSystemTrack, !system.isSilent {
+            permissions.markSystemAudioWorking()
+        }
 
         AppLog.capture.info(
             "recording stopped after \(Date().timeIntervalSince(session.startedAt), format: .fixed(precision: 1), privacy: .public) s"

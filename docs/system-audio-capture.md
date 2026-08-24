@@ -212,10 +212,22 @@ frame, 1 frame per packet, flags `0x9` — that is `kAudioFormatFlagIsFloat |
 kAudioFormatFlagIsPacked`, so packed interleaved Float32. Read it anyway rather than
 assuming it; a device that reports something else will hand over exactly what it said.
 
-## Not confirmed from headers
+## AudioCapture permission has no public status query
 
-The headers say nothing about TCC. The permission is expected to be
-`kTCCServiceAudioCapture` with `NSAudioCaptureUsageDescription` in `Info.plist`. A signed
-build does record system audio successfully, so the path works end to end, but what happens
-when the grant is *absent* has not been exercised here — whether the tap fails to create or
-quietly produces silence is still unverified, and the error message assumes the former.
+The public SDK exposes no authorization or health property for a process tap. The complete
+tap property set is UID, description and format (`AudioHardware.h:1988`–`:2028`), while
+tap creation, aggregate creation, IOProc creation and device start return only a generic
+`OSStatus`. A successful start therefore does not establish `kTCCServiceAudioCapture`
+access, and a stream of zero-valued samples cannot be distinguished from legitimate
+silence.
+
+`kAudioDevicePermissionsError` is generic and is not documented as a process-tap TCC
+result. `kAudioHardwarePropertyProcessInputMute`,
+`kAudioHardwarePropertyProcessIsAudible`, and
+`kAudioProcessPropertyIsRunningOutput` describe the current process or its output IO;
+none reports whether this process may read a tap. Screen-capture preflight checks a
+different, heavier permission and is not a substitute.
+
+The app consequently reports system audio as verified only after it has actually recorded
+a non-silent signal. Until then the state is unknown, not denied. This proves the capture
+path worked on that recording; it is not a persistent authorization query.

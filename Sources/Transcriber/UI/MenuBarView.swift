@@ -18,14 +18,20 @@ struct MenuBarView: View {
             permissionRow(
                 title: "System audio",
                 status: controller.permissions.systemAudio,
-                unknownHint: "checked when recording starts"
+                unknownHint: "not verified"
             )
 
             if let track = controller.lastMicrophoneTrack {
-                trackRow(track)
+                trackRow(
+                    track,
+                    silentHint: "The track is silent — check the input device and the microphone permission."
+                )
             }
             if let track = controller.lastSystemTrack {
-                trackRow(track)
+                trackRow(
+                    track,
+                    silentHint: "The track is silent — nothing played, or Audio Recording access is missing."
+                )
             }
 
             if let warning = controller.warning {
@@ -93,7 +99,7 @@ struct MenuBarView: View {
     /// The result of the last recording, peak amplitude included. A track of the right
     /// duration and a peak of zero is the failure this project has to be able to see at a
     /// glance, so it is called out rather than left to a log line.
-    private func trackRow(_ track: TrackRecorder.Summary) -> some View {
+    private func trackRow(_ track: TrackRecorder.Summary, silentHint: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(track.label)
@@ -104,7 +110,7 @@ struct MenuBarView: View {
                 .foregroundStyle(track.isSilent ? .red : .secondary)
             }
             if track.isSilent {
-                Text("The track is silent — check the input device and the microphone permission.")
+                Text(silentHint)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }

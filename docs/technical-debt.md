@@ -8,11 +8,14 @@ offline transcription is built on top of capture. It is not a second product roa
 
 ### P0 — make capture health explicit
 
-- Do not infer the system-audio TCC state from successful tap creation. A tap may start and
-  still deliver silence; enabling microphone AEC in that state can remove the remote side
-  from the only usable track. The signed controller device test reproduced this exact
-  ambiguity: two runs produced system peaks of 0.3291 and 0.0000 respectively, while both
-  files had the expected duration and reported no dropped frames.
+- Do not use successful tap creation as the safety condition for microphone AEC. The
+  permission UI now remains unverified until capture observes a non-silent signal, but AEC
+  still has to be chosen before that evidence exists. A silent tap can therefore remove the
+  remote side from the only usable track. The signed controller device test reproduced
+  this exact ambiguity: two runs produced system peaks of 0.3291 and 0.0000 respectively,
+  while both files had the expected duration and reported no dropped frames. The public SDK
+  has no AudioCapture authorization or tap-health query; resolving this requires a
+  data-preserving capture policy, not another permission check.
 - Represent one active session and its two track states in one place. The current state is
   spread across `RecordingController.State`, `warning`, permission state, last summaries,
   and the capture actors' optional recorders, and those sources can disagree.

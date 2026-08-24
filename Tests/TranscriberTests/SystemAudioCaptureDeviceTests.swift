@@ -87,8 +87,11 @@ final class SystemAudioCaptureDeviceTests: XCTestCase {
         let microphoneURL = directory.appending(path: "mic.wav")
         let systemURL = directory.appending(path: "system.wav")
 
-        _ = try await microphone.start(writingTo: microphoneURL)
         _ = try await systemAudio.start(writingTo: systemURL)
+        // Match production order: preserve remote audio while Voice Processing IO starts.
+        // Bringing VPIO up mutates the output graph, so this order needs its own hardware
+        // coverage even though the inverse order is easier on CoreAudio.
+        _ = try await microphone.start(writingTo: microphoneURL)
         let playback = playSomething()
         try await Task.sleep(for: .seconds(4))
         playback.terminate()

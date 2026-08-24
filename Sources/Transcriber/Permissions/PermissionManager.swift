@@ -22,9 +22,11 @@ final class PermissionManager {
 
     /// State of system audio capture.
     ///
-    /// macOS exposes no pre-flight query for this one: the only way to learn the answer is
-    /// to create a process tap and see whether it produces audio. It therefore stays
-    /// `notDetermined` until the first recording attempt reports back.
+    /// macOS exposes no pre-flight query for this one. Successful process-tap creation and
+    /// device start do not establish access, and zero-valued buffers do not reveal whether
+    /// the cause is permission or genuine silence. `granted` therefore means only that this
+    /// process has observed non-silent system audio, while `notDetermined` means the current
+    /// capture has not proved that.
     private(set) var systemAudio: Status = .notDetermined
 
     init(microphone: Status? = nil, systemAudio: Status = .notDetermined) {
@@ -53,11 +55,16 @@ final class PermissionManager {
         AppLog.permissions.notice("microphone permission answered: \(granted ? "granted" : "denied", privacy: .public)")
     }
 
-    /// Records what an actual capture attempt discovered about system audio access.
-    func setSystemAudio(_ status: Status) {
-        guard systemAudio != status else { return }
-        systemAudio = status
-        AppLog.permissions.notice("system audio permission is now \(String(describing: status), privacy: .public)")
+    /// Starts a new evidence check. There is no system API that can pre-fill its result.
+    func beginSystemAudioCheck() {
+        systemAudio = .notDetermined
+    }
+
+    /// Records only what capture proved: this process received a non-silent system signal.
+    func markSystemAudioWorking() {
+        guard systemAudio != .granted else { return }
+        systemAudio = .granted
+        AppLog.permissions.notice("system audio capture produced a non-silent signal")
     }
 
     private static func status(for status: AVAuthorizationStatus) -> Status {

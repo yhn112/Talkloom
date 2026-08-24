@@ -72,18 +72,23 @@ final class RecordingControllerTests: XCTestCase {
         return root
     }
 
-    private func failedSystemCompletion(at url: URL) -> TrackRecorder.Completion {
+    private func systemCompletion(
+        at url: URL,
+        frameCount: Int = 48_000,
+        peakAmplitude: Float = 0.25,
+        failure: TrackRecorder.Failure? = nil
+    ) -> TrackRecorder.Completion {
         TrackRecorder.Completion(
             summary: TrackRecorder.Summary(
                 label: "system",
                 url: url,
                 sampleRate: 48_000,
-                frameCount: 24_000,
-                peakAmplitude: 0.5,
+                frameCount: frameCount,
+                peakAmplitude: peakAmplitude,
                 droppedSampleCount: 0,
                 firstSampleHostTime: 1_000
             ),
-            failure: .writeFailed(label: "system", reason: "disk full")
+            failure: failure
         )
     }
 
@@ -196,7 +201,14 @@ final class RecordingControllerTests: XCTestCase {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let expectedURL = root.appending(path: "partial-system.wav")
-        let system = FakeSystemAudio(completion: failedSystemCompletion(at: expectedURL))
+        let system = FakeSystemAudio(
+            completion: systemCompletion(
+                at: expectedURL,
+                frameCount: 24_000,
+                peakAmplitude: 0.5,
+                failure: .writeFailed(label: "system", reason: "disk full")
+            )
+        )
         let controller = RecordingController(
             permissions: PermissionManager(microphone: .granted),
             sessionRoot: root,
@@ -216,5 +228,49 @@ final class RecordingControllerTests: XCTestCase {
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.failure, controller.errorMessage)
         XCTAssertEqual(manifest.tracks.first?.failure, controller.errorMessage)
+    }
+
+    func testSystemAudioIsMarkedWorkingOnlyAfterRecordingSignal() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let permissions = PermissionManager(microphone: .granted, systemAudio: .granted)
+        let system = FakeSystemAudio(
+            completion: systemCompletion(at: root.appending(path: "system.wav"))
+        )
+        let controller = RecordingController(
+            permissions: permissions,
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: system
+        )
+
+        await controller.start()
+        XCTAssertEqual(permissions.systemAudio, .notDetermined)
+
+        await controller.stop()
+        XCTAssertEqual(permissions.systemAudio, .granted)
+    }
+
+    func testSilentSystemAudioDoesNotPretendToProvePermission() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let permissions = PermissionManager(microphone: .granted)
+        let system = FakeSystemAudio(
+            completion: systemCompletion(
+                at: root.appending(path: "system.wav"),
+                peakAmplitude: 0
+            )
+        )
+        let controller = RecordingController(
+            permissions: permissions,
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: system
+        )
+
+        await controller.start()
+        await controller.stop()
+
+        XCTAssertEqual(permissions.systemAudio, .notDetermined)
     }
 }
