@@ -237,8 +237,9 @@ recording explains its own timeline to whatever reads it next.
 
 Strict concurrency is on (`SWIFT_STRICT_CONCURRENCY = complete`); do not silence
 compiler warnings. UI is `@MainActor`, capture runs on a dedicated actor or thread, ASR
-on its own actor. `@unchecked Sendable` is acceptable only for the ring buffer, and only
-with a comment stating what makes it safe.
+on its own actor. `@unchecked Sendable` is an exceptional escape hatch, not a way to
+silence the compiler: every use needs an adjacent comment that states the synchronization
+or lifetime invariant which makes it safe, and a final read-only `swift-reviewer` review.
 
 `SWIFT_VERSION` is the language mode, and `6.0` already means mode 6; there is no `6.2`
 mode to move to. Compiler features from later releases — `@concurrent`,
