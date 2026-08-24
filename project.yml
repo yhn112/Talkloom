@@ -1,0 +1,70 @@
+# XcodeGen project definition — the source of truth instead of .xcodeproj.
+# Edit here, then run `xcodegen generate`. The .xcodeproj is not kept in git.
+
+name: Transcriber
+
+options:
+  bundleIdPrefix: me.diskin
+  deploymentTarget:
+    macOS: "14.2"          # floor imposed by CoreAudio process taps
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Races in audio code are far cheaper to catch at compile time than in production.
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # A local self-signed certificate stays stable across builds, so TCC grants survive.
+    # See scripts/make-signing-cert.sh
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Transcriber Dev"
+    ENABLE_HARDENED_RUNTIME: YES
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  Transcriber:
+    type: application
+    platform: macOS
+    sources:
+      # Created in stage 0 (see PLAN.md); generation fails until it exists.
+      - path: Sources/Transcriber
+    settings:
+      base:
+        PRODUCT_NAME: Transcriber
+        PRODUCT_BUNDLE_IDENTIFIER: me.diskin.Transcriber
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Transcriber.entitlements
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: CoreAudio.framework
+      - sdk: ScreenCaptureKit.framework
+
+  TranscriberTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/TranscriberTests
+    dependencies:
+      - target: Transcriber
+    settings:
+      base:
+        # Tests exercise pure logic — ring buffer, segment merging, WAV writing —
+        # without touching hardware or requesting permissions.
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  Transcriber:
+    build:
+      targets:
+        Transcriber: all
+        TranscriberTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TranscriberTests

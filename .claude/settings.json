@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodegen:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(xcrun:*)",
+      "Bash(swift build:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(uv pip install:*)",
+      "Bash(uv venv:*)",
+      "Bash(say:*)",
+      "Bash(afconvert:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "Bash(log show:*)",
+      "Bash(log stream:*)",
+      "Bash(security find-identity:*)",
+      "Bash(codesign --display:*)",
+      "Bash(codesign --verify:*)",
+      "Bash(scripts/audio_check.py:*)",
+      "Bash(scripts/wer.py:*)"
+    ],
+    "deny": []
+  }
+}
