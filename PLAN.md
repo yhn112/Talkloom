@@ -62,6 +62,12 @@ survive rebuilds.
 
 ## Stages
 
+**Current stage: 1.** Both tracks record and are verified on device; no ASR code exists
+yet. Stage 2 is gated on the open P0 items in
+[`docs/technical-debt.md`](docs/technical-debt.md), because it builds on the recorded
+timeline and inherits whatever that timeline gets wrong. Update this line when the stage
+changes; the stages below say what each one is, not where the work stands.
+
 ### Stage 0 — skeleton
 - SwiftUI menu-bar app with a start/stop control.
 - Request permissions: microphone, and system audio capture (`kTCCServiceAudioCapture`).
@@ -80,10 +86,6 @@ survive rebuilds.
   it; an aggregate device that contains the output device as well as the tap delivers two
   streams and the tap is not the first; a tap that has died goes on producing a valid,
   silent file. See `docs/system-audio-capture.md` for the measurements.
-- Still open: a recording interrupted by a crash or a kill leaves WAV headers claiming
-  zero bytes, so the tracks read as empty even though the samples are on disk. The sizes
-  can be recovered from the file length; do it on launch for any session without a
-  `session.json`.
 - ✅ Done when: after a call, two clean tracks exist on disk, verified by measured peak
   amplitude on each — not by file size.
 

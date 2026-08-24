@@ -74,6 +74,23 @@ all; roles and skills read them from `project.yml`. A role states scope, judgeme
 what to report; the procedure it runs lives in the skill it names.
 `scripts/check_docs.py` enforces the mechanical half of this, inside `scripts/check.sh`.
 
+Which file owns what:
+
+- `PLAN.md` — product stages, architectural outcomes, and the criterion that ends each
+  stage. Not work items: a task written here is a task that will be done, and updated,
+  somewhere else.
+- `AGENTS.md` — enforceable repository and implementation rules.
+- `docs/technical-debt.md` — concrete outstanding work, each item with its status,
+  evidence, and exit criterion.
+- `docs/` otherwise — measurements, API research, architecture decisions, and procedure.
+- roles and skills — how to perform or verify work, without restating the architecture.
+- source comments — only the local invariant needed to understand that code.
+
+Between `PLAN.md` and `docs/technical-debt.md` the boundary is the one that has already
+failed once, so it is worth stating twice over: what to build is a stage, what to fix is
+a debt item, and "what to do next" is read as the current stage plus its open P0s rather
+than kept as a third list.
+
 Technical-debt records are living handoffs, not a historical notebook. Each item names
 its status, evidence, exit criterion, and the commit that introduced or resolved it when
 known. A change that resolves or invalidates an item updates the debt record in the same

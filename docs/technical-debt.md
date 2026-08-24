@@ -46,12 +46,14 @@ offline transcription is built on top of capture. It is not a second product roa
   only manifest still says `recording` and contains no track timestamps. The exit criterion
   is that manifest finalization participates in the controller result and cannot be
   reported as a successful stop.
-- Recover interrupted sessions by manifest status, not only by manifest absence. New
-  sessions always write `session.json` with `status == recording` before capture begins, so
-  the recovery condition in `PLAN.md` would skip exactly the current crash shape. On launch,
-  inspect `recording` manifests first, while retaining missing or unreadable manifests as a
-  legacy recovery case; repair WAV sizes without claiming track alignment that was never
-  checkpointed.
+- Recover interrupted sessions by manifest status, not only by manifest absence. A
+  recording interrupted by a crash or a kill leaves WAV headers claiming zero bytes, so
+  the tracks read as empty although the samples are on disk. Recovering only sessions
+  that have no `session.json` misses exactly that shape: new sessions write the manifest
+  with `status == recording` before capture begins, so the file is always there. On
+  launch, inspect `recording` manifests first, retaining missing or unreadable manifests
+  as a legacy case; repair WAV sizes from the file length without claiming track
+  alignment that was never checkpointed.
 
 ## Simplification opportunities
 
@@ -166,23 +168,21 @@ provide an explicit cleanup command for those artifacts.
 
 ## Documentation ownership
 
-**Status: mostly resolved.** The ownership split is now a rule in `AGENTS.md` ("One fact,
-one place") and its mechanical half is enforced by `scripts/check_docs.py` inside
+**Status: mostly resolved.** Which file owns what is now a rule in `AGENTS.md` ("One
+fact, one place"), and its mechanical half is enforced by `scripts/check_docs.py` inside
 `scripts/check.sh`: no version literals in `.agents/`, no dangling paths, no roster drift
 between the two clients, and the bundle identifier checked against `project.yml`.
-
-The ownership itself:
-
-- `PLAN.md`: product stages and architectural outcomes;
-- `AGENTS.md`: enforceable repository and implementation rules;
-- `docs/`: measurements, API research, architecture decisions, and procedure;
-- roles and skills: how to perform or verify work, without restating the architecture;
-- source comments: only the local invariant needed to understand that code.
 
 Reproduced evidence for the original item: `a1e9e68` raised the deployment floor to
 macOS 15 and updated `project.yml`, `PLAN.md` and `docs/system-audio-capture.md`, leaving
 the old floor in `.agents/roles/api-scout.md` and `.agents/skills/check-api/SKILL.md`.
 Both are corrected and the check now fails on a reintroduced version literal.
+
+A second instance, found and fixed the same way: `PLAN.md` carried the WAV-header
+recovery as a Stage 1 work item while the P0 above already owned it, and the two had
+diverged — the plan prescribed recovering sessions without a `session.json`, which the
+current code never produces. `PLAN.md` now states which stage is current and leaves work
+items to this file.
 
 Remaining, not blocking: the claim that capture writes 16 kHz files or uses a live
 converter no longer appears anywhere, but the resampling argument is still stated twice
