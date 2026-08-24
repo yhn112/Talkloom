@@ -79,6 +79,10 @@ xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
 This is what `scripts/check.sh` runs, so prefer the script unless a single test is being
 chased down.
 
+When a parameterized Swift Testing case fails, `xcsift` names the test but not the
+argument — it reports `header field, Test failed`. Re-run without the pipe to see which
+row broke; the raw output names it.
+
 ### Tests that use the real microphone
 
 Capture code is only verified against a real recording, so those tests live in the

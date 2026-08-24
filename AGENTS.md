@@ -205,6 +205,19 @@ compiler warnings. UI is `@MainActor`, capture runs on a dedicated actor or thre
 on its own actor. `@unchecked Sendable` is acceptable only for the ring buffer, and only
 with a comment stating what makes it safe.
 
+### Tests
+
+New tests are written with Swift Testing — `@Suite`, `@Test`, `#expect`, `#require`. The
+existing XCTest suites are not worth a migration commit of their own; convert one when a
+change touches it anyway. Both frameworks run side by side in the same test target.
+
+The reason is parameterization. A table — header fields, ducking configurations, sample
+rates — becomes one `@Test(arguments:)` where every row is a named case, instead of a
+dozen assertions in one test whose failure names only the test. `WAVWriterTests` is the
+example to copy.
+
+XCTest stays where Swift Testing has no answer: `measure` blocks and UI automation.
+
 ### Permissions (TCC)
 
 Three distinct permissions that are easy to confuse:
