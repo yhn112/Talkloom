@@ -163,6 +163,46 @@ couple of seconds has stopped. That is the signal this project rebuilds on.
 6. `AudioDeviceCreateIOProcIDWithBlock`, then `AudioDeviceStart`.
 7. On teardown, reverse it: stop, destroy the IOProcID, destroy the aggregate, destroy the tap.
 
+## Voice processing ducks what the tap records
+
+The microphone runs through Voice Processing IO for echo cancellation, and voice processing
+also ducks "other audio" so a chat stays intelligible. Other audio here is the meeting, and
+the tap records the output mix *after* that ducking — so the setting on the microphone
+determines how loud the remote participants land in the system track.
+
+Measured with a 440 Hz tone at amplitude 0.5 played through the built-in speakers, RMS over
+a settled window, against the same tone recorded with no microphone running (−9.0 dBFS,
+which is exactly the theoretical RMS of that tone, so the tap itself is unity gain):
+
+| `enableAdvancedDucking` | `duckingLevel` | Level | Attenuation |
+| --- | --- | --- | --- |
+| false | `.min` | −17.0 dBFS | **−8.0 dB** |
+| false | `.mid` | −33.0 dBFS | −24.0 dB |
+| false | `.default` | −39.0 dBFS | −30.0 dB |
+| false | `.max` | −59.0 dBFS | −50.0 dB |
+| true | `.min` | −24.9 dBFS | −15.9 dB |
+| true | `.default` | −31.2 dBFS | −22.1 dB |
+| true | `.mid` | −31.3 dBFS | −22.2 dB |
+| true | `.max` | −36.3 dBFS | −27.3 dB |
+
+Reproducible to 0.1 dB across runs. `false` + `.min` is the floor and is what the app uses;
+note that Apple's WWDC23 sample pairs `.min` with advanced ducking *enabled*, which is right
+for a call where other audio is a distraction and costs another 8 dB here.
+
+Eight decibels is not nothing, but −17 dBFS is far above anything ASR struggles with, so it
+is accepted rather than worked around. The alternative worth revisiting later is to drop
+voice processing altogether and cancel the echo offline instead: both tracks are on disk
+with a common time origin, so the reference signal the canceller needs is exactly the system
+track.
+
+### Measure a settled level, not a peak
+
+Ducking ramps in rather than switching. A peak taken across the ramp reports whatever
+fraction of the un-ducked opening happened to land in the window, and the same configuration
+came back at 0.44 and at 0.199 on consecutive runs before this was noticed. Peak amplitude
+answers "is this track silent", which is what the capture tests need; it does not answer
+"how loud is it".
+
 ## What the tap reports
 
 Measured on macOS 26.6, built-in output, `initMonoGlobalTapButExcludeProcesses` with an

@@ -13,6 +13,21 @@ actor MicrophoneCapture {
     /// nothing downstream may assume it.
     private static let tapBufferSize: AVAudioFrameCount = 4_096
 
+    /// The ducking configuration that leaves the meeting as audible as voice processing
+    /// allows — which is not "unducked".
+    ///
+    /// Voice processing ducks "other audio" so a voice chat stays intelligible. Here the
+    /// other audio *is* the meeting, and the process tap records it, so ducking quiets the
+    /// remote participants in the very track meant to carry them. Measured against a
+    /// steady tone, the eight available configurations span 8 to 50 dB of attenuation, and
+    /// this one is the floor. Apple's own sample pairs `.min` with advanced ducking turned
+    /// on; that is right for a call where other audio is a distraction and costs 8 dB more
+    /// here. See `DuckingMeasurementTests` for the table.
+    static let transparentDucking = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+        enableAdvancedDucking: false,
+        duckingLevel: .min
+    )
+
     enum Failure: Error, LocalizedError {
         case voiceProcessingUnavailable(String)
         case unusableInputFormat(sampleRate: Double, channelCount: UInt32)
@@ -43,7 +58,11 @@ actor MicrophoneCapture {
     ///   the switch exists so its effect can be measured against a recording made without
     ///   it, which is the only way to tell a working canceller from a silent one.
     @discardableResult
-    func start(writingTo url: URL, voiceProcessing: Bool = true) async throws -> AVAudioFormat {
+    func start(
+        writingTo url: URL,
+        voiceProcessing: Bool = true,
+        ducking: AVAudioVoiceProcessingOtherAudioDuckingConfiguration = MicrophoneCapture.transparentDucking
+    ) async throws -> AVAudioFormat {
         guard recorder == nil else { return engine.inputNode.outputFormat(forBus: 0) }
         let input = engine.inputNode
 
@@ -56,13 +75,10 @@ actor MicrophoneCapture {
         }
 
         if voiceProcessing {
-            // Voice processing ducks "other audio" by default to make a voice chat more
-            // intelligible. Here the other audio *is* the meeting: ducking it would quiet
-            // the remote participants in the system track, which presents as "everyone else
-            // is too far away to transcribe". Minimum level, and no advanced ducking.
-            input.voiceProcessingOtherAudioDuckingConfiguration = .init(
-                enableAdvancedDucking: false,
-                duckingLevel: .min
+            input.voiceProcessingOtherAudioDuckingConfiguration = ducking
+            let applied = input.voiceProcessingOtherAudioDuckingConfiguration
+            AppLog.capture.debug(
+                "ducking requested advanced=\(ducking.enableAdvancedDucking.boolValue, privacy: .public) level=\(ducking.duckingLevel.rawValue, privacy: .public); node reports advanced=\(applied.enableAdvancedDucking.boolValue, privacy: .public) level=\(applied.duckingLevel.rawValue, privacy: .public)"
             )
         }
 
