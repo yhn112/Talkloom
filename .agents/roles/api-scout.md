@@ -20,7 +20,8 @@ Answer four questions per symbol:
 1. **Exact signature** — name, parameters, types, return value, and how it reports
    failure (`OSStatus`, `throws`, `nil`, a delegate callback).
 2. **Availability** — the version from `API_AVAILABLE`/`@available`, quoted verbatim.
-   This project's floor is macOS 14.2.
+   Compare it against the deployment target in `project.yml`; never against a version
+   remembered from a previous task.
 3. **Ownership and threading** — who owns the buffers, and which thread invokes the
    callback. This matters here: anything called on the audio thread inherits a ban on
    allocation and locking.

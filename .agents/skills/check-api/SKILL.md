@@ -28,8 +28,9 @@ guessing.
    description of parameters, buffer ownership, and calling thread lives in the comment
    above the function — that is where the answers autocomplete can't give you are.
 
-3. **Check availability verbatim against `API_AVAILABLE`.** This project's floor is
-   macOS 14.2. A symbol introduced later needs `if #available` and a fallback path.
+3. **Check availability verbatim against `API_AVAILABLE`,** and compare it against the
+   deployment target in `project.yml` — read it, do not recall it; the floor has moved
+   before. A symbol introduced later needs `if #available` and a fallback path.
 
 4. **For a Swift wrapper over Objective-C, confirm the actual imported signature** when
    it isn't obvious:
