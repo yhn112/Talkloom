@@ -213,6 +213,27 @@ final class TrackRecorderTests {
         }
     }
 
+    @Test("the first timestamp is reported outside the audio callback")
+    func firstTimestampIsReportedOutsideTheAudioCallback() async throws {
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "timestamp.wav"),
+            sampleRate: 48_000,
+            content: .remote
+        )
+        recorder.input.noteFirstHostTime(1_234)
+
+        let reported = await withCheckedContinuation {
+            (continuation: CheckedContinuation<UInt64, Never>) in
+            Task {
+                await recorder.observeFirstSample { continuation.resume(returning: $0) }
+            }
+        }
+
+        #expect(reported == 1_234)
+        _ = await recorder.finish()
+    }
+
     /// A write failure belongs to the session while it is still running, not to `finish()`.
     /// Waiting for stop means the file quietly stopped growing behind a UI that still says
     /// "recording", and the rest of the meeting is gone before anyone is told.

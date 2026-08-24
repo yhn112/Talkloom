@@ -85,6 +85,8 @@ actor TrackRecorder {
     private var isFinished = false
     private var firstFailure: Failure?
     private var failureHandler: (@Sendable (Failure) -> Void)?
+    private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
+    private var didReportFirstSample = false
 
     enum Failure: Error, LocalizedError, Sendable, Equatable {
         case unsupportedSourceFormat(sampleRate: Double)
@@ -164,6 +166,17 @@ actor TrackRecorder {
         if let firstFailure { deliver(firstFailure) }
     }
 
+    /// Reports the first hardware timestamp from outside the real-time callback.
+    ///
+    /// The callback only stores one atomic value. The drain actor notices it here and hands
+    /// it to the session owner, which may safely checkpoint `session.json` on disk. A sample
+    /// that arrived before observation was armed is delivered immediately.
+    func observeFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) {
+        guard !isFinished else { return }
+        firstSampleHandler = handler
+        reportFirstSampleIfNeeded()
+    }
+
     /// Stops draining, flushes whatever the producer left behind, and closes the file.
     ///
     /// The caller must have stopped the producer first: anything written after this point
@@ -179,6 +192,7 @@ actor TrackRecorder {
         isFinished = true
         // Nobody is listening once the track is closed; the completion carries the failure.
         failureHandler = nil
+        firstSampleHandler = nil
         do {
             try writer.finish()
         } catch {
@@ -203,7 +217,9 @@ actor TrackRecorder {
     }
 
     private func drain() {
-        guard !isFinished, firstFailure == nil else { return }
+        guard !isFinished else { return }
+        reportFirstSampleIfNeeded()
+        guard firstFailure == nil else { return }
 
         // A drop is a hole in the timeline, not merely some missing samples. Whatever the
         // producer manages to hand over afterwards is written directly behind what came
@@ -252,6 +268,15 @@ actor TrackRecorder {
             // A short read means the ring is empty; the rest arrives on the next pass.
             if read < capacity { return }
         }
+    }
+
+    private func reportFirstSampleIfNeeded() {
+        guard !didReportFirstSample, let hostTime = input.firstSampleHostTime,
+            let firstSampleHandler
+        else { return }
+        didReportFirstSample = true
+        self.firstSampleHandler = nil
+        firstSampleHandler(hostTime)
     }
 
     private func recordFailure(_ failure: Failure) {

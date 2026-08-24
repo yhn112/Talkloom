@@ -142,7 +142,7 @@ final class SessionRecoveryTests {
         #expect(repaired.startedAt == Date(timeIntervalSince1970: 1_000))
         #expect(repaired.tracks.map(\.file) == ["mic.wav", "system.wav"])
         #expect(repaired.tracks.allSatisfy { $0.frameCount == 1_000 })
-        #expect(repaired.failure?.contains("alignment") == true)
+        #expect(repaired.failure?.contains("Alignment is unavailable") == true)
         #expect(try declaredDataByteCount(of: interrupted.appending(path: "mic.wav")) == 2_000)
 
         // Nothing that was never measured is now claimed to have been.
@@ -157,6 +157,30 @@ final class SessionRecoveryTests {
 
         // Recovery is not a state the app has to remember: the second pass finds nothing.
         #expect(SessionRecovery.recoverInterrupted(in: root).isEmpty)
+    }
+
+    /// The two host times came from one machine clock before the crash. Their absolute
+    /// values do not survive as part of the finished format; their difference does.
+    @Test("a recovered session retains checkpointed track alignment")
+    func recoveredSessionRetainsCheckpointedTrackAlignment() throws {
+        let second = HostTime.hostTicks(forSeconds: 0.75)
+        let checkpointManifest = RecordingManifest.recording(
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        .checkpointingFirstSample(file: "system.wav", hostTime: 1_000)
+        .checkpointingFirstSample(file: "mic.wav", hostTime: 1_000 + second)
+        let directory = try session("2026-01-02_11-00-00", manifest: checkpointManifest)
+
+        _ = SessionRecovery.recoverInterrupted(in: root)
+
+        let recovered = try manifest(in: directory)
+        let mic = try #require(recovered.tracks.first { $0.file == "mic.wav" })
+        let system = try #require(recovered.tracks.first { $0.file == "system.wav" })
+        #expect(recovered.status == .interrupted)
+        #expect(system.startOffset == 0)
+        #expect(abs(try #require(mic.startOffset) - 0.75) < 0.001)
+        #expect(recovered.failure?.contains("Alignment is unavailable") == false)
+        #expect(recovered.trackStarts.isEmpty, "raw host times are replaced by offsets")
     }
 
     /// Sessions recorded before the in-progress manifest existed have no `session.json`, and

@@ -83,6 +83,28 @@ struct RecordingManifestTests {
         #expect(try roundTrip(manifest) == manifest)
     }
 
+    /// Finalization is too late to be the first durable copy: a killed process never runs
+    /// it. The in-progress manifest therefore carries the raw host times until they can be
+    /// replaced by portable offsets in the finished shape.
+    @Test("first samples are checkpointed once while recording")
+    func firstSamplesAreCheckpointedOnceWhileRecording() throws {
+        let manifest = RecordingManifest.recording(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        .checkpointingFirstSample(file: "system.wav", hostTime: 1_000)
+        .checkpointingFirstSample(file: "mic.wav", hostTime: 2_000)
+        .checkpointingFirstSample(file: "system.wav", hostTime: 9_000)
+
+        let decoded = try roundTrip(manifest)
+
+        #expect(decoded.status == .recording)
+        #expect(
+            decoded.trackStarts == [
+                .init(file: "mic.wav", hostTime: 2_000),
+                .init(file: "system.wav", hostTime: 1_000),
+            ])
+    }
+
     /// The fallback recording is the one that must not be taken at face value later: echo
     /// cancellation is off, so the microphone track holds both sides of the call and cannot
     /// be labelled "me". The manifest is the only place that survives to say so.
@@ -181,6 +203,7 @@ struct RecordingManifestTests {
         #expect(manifest.tracks.count == legacy.trackCount)
         #expect(manifest.failure == legacy.failure)
         #expect(manifest.warning == nil)
+        #expect(manifest.trackStarts.isEmpty)
         #expect(manifest.tracks.allSatisfy { $0.content == nil })
     }
 

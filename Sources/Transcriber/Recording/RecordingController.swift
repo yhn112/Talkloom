@@ -4,12 +4,14 @@ import TranscriberCore
 
 protocol MicrophoneCapturing: Sendable {
     func begin(writingTo url: URL, voiceProcessing: Bool) async throws
+    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async
     func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
     func end() async -> TrackRecorder.Completion?
 }
 
 protocol SystemAudioCapturing: Sendable {
     func begin(writingTo url: URL) async throws
+    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async
     func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
     func end() async -> TrackRecorder.Completion?
 }
@@ -38,6 +40,7 @@ final class RecordingController {
     enum State: Equatable {
         case idle
         case starting(RecordingSession?)
+        case failingStartup(RecordingSession, String)
         case recording(RecordingSession)
         case stopping(RecordingSession)
         case failed(String)
@@ -72,14 +75,14 @@ final class RecordingController {
     var isRecording: Bool {
         switch state {
         case .starting(let session): session != nil
-        case .recording, .stopping: true
+        case .failingStartup, .recording, .stopping: true
         default: false
         }
     }
 
     var isTransitioning: Bool {
         switch state {
-        case .starting, .stopping: true
+        case .starting, .failingStartup, .stopping: true
         default: false
         }
     }
@@ -87,13 +90,15 @@ final class RecordingController {
     var currentSession: RecordingSession? {
         switch state {
         case .starting(let session): session
-        case .recording(let session), .stopping(let session): session
+        case .failingStartup(let session, _), .recording(let session), .stopping(let session):
+            session
         default: nil
         }
     }
 
     var errorMessage: String? {
         if case .failed(let message) = state { return message }
+        if case .failingStartup(_, let message) = state { return message }
         return nil
     }
 
@@ -134,7 +139,7 @@ final class RecordingController {
             await start()
         case .recording:
             await stop()
-        case .starting, .stopping:
+        case .starting, .failingStartup, .stopping:
             return
         }
     }
@@ -165,6 +170,9 @@ final class RecordingController {
             do {
                 try await systemAudio.begin(writingTo: created.systemTrackURL)
                 systemStarted = true
+                await monitorSystemFirstSample(for: created)
+                if await finishStartupFailureIfNeeded(for: created) { return }
+                guard state == .starting(created) else { return }
             } catch {
                 warning =
                     "Recording the microphone only, with echo cancellation off so the other participants are still captured through the speakers. \(error.localizedDescription)"
@@ -177,12 +185,21 @@ final class RecordingController {
                 writingTo: created.microphoneTrackURL,
                 voiceProcessing: systemStarted
             )
+            if await finishStartupFailureIfNeeded(for: created) { return }
+            await monitorMicrophoneFirstSample(for: created)
+            if await finishStartupFailureIfNeeded(for: created) { return }
+            guard state == .starting(created) else { return }
 
             state = .recording(created)
             await armRuntimeFailureMonitoring()
             guard state == .recording(created) else { return }
             AppLog.capture.info("recording started in \(created.directory.path, privacy: .public)")
         } catch {
+            // A checkpoint failure may already be stopping this startup while one of the
+            // capture actors finishes an awaited `begin`. That path owns cleanup and the
+            // final manifest; it must not be overwritten by this task resuming later.
+            if let session, await finishStartupFailureIfNeeded(for: session) { return }
+            if let session, state != .starting(session) { return }
             // End both paths even when only one reached its running state. The capture
             // contracts make ending a path that never started a no-op.
             _ = await microphone.end()
@@ -202,6 +219,28 @@ final class RecordingController {
         return false
     }
 
+    private func monitorMicrophoneFirstSample(for session: RecordingSession) async {
+        await microphone.monitorFirstSample { [weak self] hostTime in
+            Task { @MainActor [weak self] in
+                await self?.checkpointFirstSample(
+                    file: session.microphoneTrackURL.lastPathComponent,
+                    hostTime: hostTime,
+                    for: session)
+            }
+        }
+    }
+
+    private func monitorSystemFirstSample(for session: RecordingSession) async {
+        await systemAudio.monitorFirstSample { [weak self] hostTime in
+            Task { @MainActor [weak self] in
+                await self?.checkpointFirstSample(
+                    file: session.systemTrackURL.lastPathComponent,
+                    hostTime: hostTime,
+                    for: session)
+            }
+        }
+    }
+
     private func armRuntimeFailureMonitoring() async {
         await microphone.monitorRuntimeFailures { [weak self] message in
             Task { @MainActor [weak self] in
@@ -213,6 +252,52 @@ final class RecordingController {
                 await self?.handleRuntimeFailure("System audio capture stopped: \(message)")
             }
         }
+    }
+
+    private func checkpointFirstSample(
+        file: String,
+        hostTime: UInt64,
+        for session: RecordingSession
+    ) async {
+        guard state == .starting(session) || state == .recording(session) else { return }
+
+        do {
+            let manifestURL = session.directory.appending(path: RecordingManifest.fileName)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let manifest = try decoder.decode(
+                RecordingManifest.self,
+                from: Data(contentsOf: manifestURL))
+            guard manifest.status == .recording else { return }
+            try manifest.checkpointingFirstSample(file: file, hostTime: hostTime)
+                .write(to: session.directory)
+        } catch {
+            await handleCheckpointFailure(
+                for: session,
+                "The session timeline could not be checkpointed: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleCheckpointFailure(for session: RecordingSession, _ message: String) async {
+        switch state {
+        case .starting(let active) where active == session:
+            // A capture actor may currently be suspended inside `begin()`, before it has
+            // published the resource that `end()` must tear down. Let that owner finish
+            // startup, then the startup task calls `finishStartupFailureIfNeeded`.
+            state = .failingStartup(session, message)
+        case .recording(let active) where active == session:
+            await finish(session: session, failure: message)
+        default:
+            return
+        }
+    }
+
+    private func finishStartupFailureIfNeeded(for session: RecordingSession) async -> Bool {
+        guard case .failingStartup(let active, let message) = state, active == session else {
+            return false
+        }
+        await finish(session: session, failure: message)
+        return true
     }
 
     private func handleRuntimeFailure(_ message: String) async {

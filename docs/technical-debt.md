@@ -32,14 +32,6 @@ those sources can disagree.
 
 ## P0 — a truthful timeline
 
-### D3 — first-sample timestamps are never checkpointed while recording
-`open · P0 · reproduced` — `SessionRecovery` repairs an interrupted session and publishes
-no alignment, because none was ever written down. Honest, and not sufficient: the recovered
-meeting comes back as two tracks that cannot be merged by timestamp, which is most of what
-a transcript needs them for.
-**Exit:** each track's first-sample host time reaches disk while recording, not only at
-finalization.
-
 ### D4 — a dropped block costs the rest of the meeting
 `interim policy · P0 · reproduced` — Shown by the existing ring-buffer and oversized-block
 tests. A drop now fails the track and stops the session (`TrackRecorder.drain`), so no
@@ -154,6 +146,11 @@ cancellation, and peak across four seconds does not measure cancellation — the
 converges over the first seconds, so peak reports where the loud syllables fell. The same
 configuration measured 0.0057, 0.0064, 0.0078, 0.0835 and 0.6105 across five runs, and a
 single-engine variant produced 0.0076, 0.0588, 0.2783 and 1.0000. **It passes by luck.**
+The shared speech stimulus also suppresses `Process.run()` failure with `try?`, and callers
+do not establish that playback happened. A controller run consequently recorded a zero-peak
+system track while the user heard no stimulus; the immediately following system-only and
+controller runs carried signal normally, so that run is evidence about the harness rather
+than a tap failure.
 **Exit:** exploratory measurements move to a manual diagnostics or benchmark target;
 cancellation is measured as settled RMS over a window starting after convergence, as the
 ducking table in `docs/system-audio-capture.md` already does; the device scheme keeps only

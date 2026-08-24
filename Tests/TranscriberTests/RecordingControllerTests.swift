@@ -8,6 +8,7 @@ import TranscriberCore
 @MainActor
 struct RecordingControllerTests {
     private actor FakeMicrophone: MicrophoneCapturing {
+        let startDelay: Duration
         let shouldFailStart: Bool
         private(set) var beginCount = 0
         private(set) var endCount = 0
@@ -16,25 +17,42 @@ struct RecordingControllerTests {
         /// whether the system tap came up, and it decides what the microphone track
         /// contains, so it is the part worth pinning down here.
         private(set) var lastVoiceProcessing: Bool?
+        private(set) var hasLiveResource = false
         private var failureHandler: (@Sendable (String) -> Void)?
+        private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
 
-        init(shouldFailStart: Bool = false) { self.shouldFailStart = shouldFailStart }
+        init(startDelay: Duration = .zero, shouldFailStart: Bool = false) {
+            self.startDelay = startDelay
+            self.shouldFailStart = shouldFailStart
+        }
 
         func begin(writingTo url: URL, voiceProcessing: Bool) async throws {
             beginCount += 1
             lastVoiceProcessing = voiceProcessing
+            if startDelay > .zero { try await Task.sleep(for: startDelay) }
             if shouldFailStart { throw CocoaError(.fileWriteUnknown) }
+            // Production publishes its recorder after its final suspension. Installing the
+            // marker here reproduces the actor-reentrancy window a premature `end()` misses.
+            hasLiveResource = true
         }
 
         func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
             failureHandler = handler
         }
 
+        func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) {
+            firstSampleHandler = handler
+        }
+
         func end() -> TrackRecorder.Completion? {
             endCount += 1
             failureHandler = nil
+            firstSampleHandler = nil
+            hasLiveResource = false
             return nil
         }
+
+        func reportFirstSample(_ hostTime: UInt64) { firstSampleHandler?(hostTime) }
     }
 
     private actor FakeSystemAudio: SystemAudioCapturing {
@@ -45,6 +63,7 @@ struct RecordingControllerTests {
         private(set) var beginCount = 0
         private(set) var endCount = 0
         private var failureHandler: (@Sendable (String) -> Void)?
+        private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
 
         init(
             startDelay: Duration = .zero,
@@ -68,14 +87,21 @@ struct RecordingControllerTests {
             failureHandler = handler
         }
 
+        func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) {
+            firstSampleHandler = handler
+        }
+
         func end() async -> TrackRecorder.Completion? {
             endCount += 1
             if endDelay > .zero { try? await Task.sleep(for: endDelay) }
             failureHandler = nil
+            firstSampleHandler = nil
             return completion
         }
 
         func fail(_ message: String) { failureHandler?(message) }
+        func reportFirstSample(_ hostTime: UInt64) { firstSampleHandler?(hostTime) }
+        var isMonitoringFirstSample: Bool { firstSampleHandler != nil }
     }
 
     private func temporaryRoot() throws -> URL {
@@ -126,7 +152,9 @@ struct RecordingControllerTests {
 
         let url = directory.appending(path: "mic.wav")
         let writer = try WAVWriter(url: url, sampleRate: 48_000, channelCount: 1)
-        try [Int16](repeating: 4_096, count: 1_000).withUnsafeBufferPointer { try writer.append($0) }
+        try [Int16](repeating: 4_096, count: 1_000).withUnsafeBufferPointer {
+            try writer.append($0)
+        }
         try writer.finish()
         var bytes = try Data(contentsOf: url)
         bytes.replaceSubrange(4..<8, with: Data(repeating: 0, count: 4))
@@ -190,7 +218,7 @@ struct RecordingControllerTests {
     func secondStartDuringStartupIsIgnored() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let microphone = FakeMicrophone()
+        let microphone = FakeMicrophone(startDelay: .milliseconds(100))
         let system = FakeSystemAudio(startDelay: .milliseconds(100))
         let controller = RecordingController(
             permissions: PermissionManager(microphone: .granted),
@@ -234,6 +262,89 @@ struct RecordingControllerTests {
         #expect(await microphone.endCount == 1)
         #expect(await system.endCount == 1)
         #expect(try manifest(in: session).failure == controller.errorMessage)
+    }
+
+    /// This is inspected before stop: the final manifest already carried the offsets. The
+    /// regression is specifically whether a kill during capture loses the only alignment.
+    @Test("first samples reach the in-progress manifest")
+    func firstSamplesReachTheInProgressManifest() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone(startDelay: .milliseconds(100))
+        let system = FakeSystemAudio()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+        let start = Task { await controller.start() }
+        for _ in 0..<100 where !(await system.isMonitoringFirstSample) {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(await system.isMonitoringFirstSample)
+        let session = try #require(controller.currentSession)
+
+        await system.reportFirstSample(1_000)
+        for _ in 0..<20 where (try? manifest(in: session).trackStarts.count) != 1 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(
+            try manifest(in: session).trackStarts == [
+                .init(file: "system.wav", hostTime: 1_000)
+            ],
+            "system time is durable while microphone startup is still suspended")
+
+        await start.value
+        await microphone.reportFirstSample(2_000)
+        for _ in 0..<20 where (try? manifest(in: session).trackStarts.count) != 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let inProgress = try manifest(in: session)
+        #expect(inProgress.status == .recording)
+        #expect(
+            inProgress.trackStarts == [
+                .init(file: "mic.wav", hostTime: 2_000),
+                .init(file: "system.wav", hostTime: 1_000),
+            ])
+        await controller.stop()
+    }
+
+    @Test("a checkpoint failure stops the session")
+    func checkpointFailureStopsTheSession() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone(startDelay: .milliseconds(100))
+        let system = FakeSystemAudio()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+        let start = Task { await controller.start() }
+        for _ in 0..<100 where !(await system.isMonitoringFirstSample) {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(await system.isMonitoringFirstSample)
+        let session = try #require(controller.currentSession)
+        let path = session.directory.path
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        }
+
+        await system.reportFirstSample(1_000)
+        for _ in 0..<20 where controller.errorMessage == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await start.value
+
+        #expect(controller.errorMessage?.contains("timeline could not be checkpointed") == true)
+        #expect(await microphone.endCount == 1)
+        #expect(await !microphone.hasLiveResource)
+        #expect(await system.endCount == 1)
     }
 
     @Test("a start during stop is ignored")

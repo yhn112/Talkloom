@@ -31,6 +31,17 @@ extension DeviceTests {
             speech.terminate()
             speech.waitUntilExit()
 
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let manifestURL = session.directory.appending(path: RecordingManifest.fileName)
+            let inProgress = try decoder.decode(
+                RecordingManifest.self,
+                from: Data(contentsOf: manifestURL))
+            #expect(inProgress.status == .recording)
+            #expect(
+                Set(inProgress.trackStarts.map(\.file)) == ["mic.wav", "system.wav"],
+                "both first-sample timestamps reached disk before stop")
+
             await controller.stop()
             #expect(!controller.isRecording)
 
@@ -40,6 +51,12 @@ extension DeviceTests {
             #expect(microphone.frameCount > 0)
             #expect(microphone.droppedSampleCount == 0)
             #expect(system.droppedSampleCount == 0)
+            print(
+                "  microphone: \(String(format: "%.3f", microphone.duration)) s, peak \(String(format: "%.4f", microphone.peakAmplitude)), dropped \(microphone.droppedSampleCount)"
+            )
+            print(
+                "  system: \(String(format: "%.3f", system.duration)) s, peak \(String(format: "%.4f", system.peakAmplitude)), dropped \(system.droppedSampleCount)"
+            )
 
             // The two tracks are never one file, and both actually reached disk.
             #expect(FileManager.default.fileExists(atPath: session.microphoneTrackURL.path))
@@ -51,10 +68,7 @@ extension DeviceTests {
                 try AVAudioFile(forReading: session.systemTrackURL).length
                     == AVAudioFramePosition(system.frameCount))
 
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let data = try Data(
-                contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+            let data = try Data(contentsOf: manifestURL)
             let manifest = try decoder.decode(RecordingManifest.self, from: data)
 
             #expect(Set(manifest.tracks.map(\.file)) == ["mic.wav", "system.wav"])

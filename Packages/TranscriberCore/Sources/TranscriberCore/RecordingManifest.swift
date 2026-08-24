@@ -50,7 +50,12 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         /// A track found on disk after an interrupted session. Its length comes from the
         /// file; everything else was never written down, so it stays unknown rather than
         /// being reconstructed into something that looks measured.
-        static func recovered(file: String, sampleRate: Double, frameCount: Int) -> Track {
+        static func recovered(
+            file: String,
+            sampleRate: Double,
+            frameCount: Int,
+            startOffset: TimeInterval?
+        ) -> Track {
             Track(
                 file: file,
                 sampleRate: sampleRate,
@@ -58,9 +63,24 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
                 peakAmplitude: nil,
                 droppedSampleCount: nil,
                 failure: nil,
-                startOffset: nil,
+                startOffset: startOffset,
                 content: nil
             )
+        }
+    }
+
+    /// A first-sample timestamp checkpointed while capture is still running.
+    ///
+    /// A mach host time is meaningful here only relative to another track from the same
+    /// recording. The finished manifest stores those differences as `startOffset`; the raw
+    /// values exist only long enough to survive an interrupted recording.
+    public struct TrackStart: Codable, Equatable, Sendable {
+        public let file: String
+        public let hostTime: UInt64
+
+        public init(file: String, hostTime: UInt64) {
+            self.file = file
+            self.hostTime = hostTime
         }
     }
 
@@ -68,6 +88,9 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     public let status: Status
     public let tracks: [Track]
     public let failure: String?
+
+    /// First samples observed before finalization. Empty on a finished session.
+    public let trackStarts: [TrackStart]
 
     /// Why a session that completed is not the session that was asked for — the system tap
     /// failing to start, and the microphone therefore recording both sides without echo
@@ -82,13 +105,15 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         status: Status,
         tracks: [Track],
         failure: String?,
-        warning: String?
+        warning: String?,
+        trackStarts: [TrackStart] = []
     ) {
         self.startedAt = startedAt
         self.status = status
         self.tracks = tracks
         self.failure = failure
         self.warning = warning
+        self.trackStarts = trackStarts
     }
 
     /// Written as soon as the session directory is reserved. If the process dies before
@@ -101,6 +126,24 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
             tracks: [],
             failure: nil,
             warning: nil
+        )
+    }
+
+    /// Returns the in-progress manifest with one track's first sample checkpointed.
+    /// Repeated reports cannot replace the first timestamp that already reached disk.
+    public func checkpointingFirstSample(file: String, hostTime: UInt64) -> RecordingManifest {
+        guard status == .recording, hostTime != 0,
+            !trackStarts.contains(where: { $0.file == file })
+        else { return self }
+
+        return RecordingManifest(
+            startedAt: startedAt,
+            status: status,
+            tracks: tracks,
+            failure: failure,
+            warning: warning,
+            trackStarts: (trackStarts + [TrackStart(file: file, hostTime: hostTime)])
+                .sorted { $0.file < $1.file }
         )
     }
 
@@ -132,6 +175,7 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         self.startedAt = startedAt
         self.failure = failure
         self.warning = warning
+        trackStarts = []
         status = failure == nil ? .completed : .failed
         let origin = reports.compactMap(\.firstSampleHostTime).min()
         tracks = reports.map { report in
@@ -159,6 +203,7 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         tracks = try container.decode([Track].self, forKey: .tracks)
         failure = try container.decodeIfPresent(String.self, forKey: .failure)
         warning = try container.decodeIfPresent(String.self, forKey: .warning)
+        trackStarts = try container.decodeIfPresent([TrackStart].self, forKey: .trackStarts) ?? []
         status =
             try container.decodeIfPresent(Status.self, forKey: .status)
             ?? (failure == nil ? .completed : .failed)

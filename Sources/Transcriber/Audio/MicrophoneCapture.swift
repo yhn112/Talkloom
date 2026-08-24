@@ -163,6 +163,11 @@ actor MicrophoneCapture {
         }
     }
 
+    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async {
+        guard let recorder else { return }
+        await recorder.observeFirstSample(handler)
+    }
+
     /// Stops capture and closes the file.
     func stop() async -> TrackRecorder.Completion? {
         guard let recorder else { return nil }
