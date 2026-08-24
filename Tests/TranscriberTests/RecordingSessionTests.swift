@@ -39,4 +39,19 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(session.microphoneTrackURL.lastPathComponent, "mic.wav")
         XCTAssertEqual(session.systemTrackURL.lastPathComponent, "system.wav")
     }
+
+    func testTwoSessionsStartedInTheSameSecondUseDifferentDirectories() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "TranscriberTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let startedAt = Date(timeIntervalSince1970: 1_756_045_812)
+
+        let first = try RecordingSession.create(startedAt: startedAt, root: root)
+        let second = try RecordingSession.create(startedAt: startedAt, root: root)
+
+        XCTAssertNotEqual(first.directory, second.directory)
+        XCTAssertEqual(second.directory.lastPathComponent, "\(first.directory.lastPathComponent)-2")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.directory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.directory.path))
+    }
 }

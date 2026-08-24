@@ -48,11 +48,21 @@ struct RecordingSession: Equatable, Sendable {
         fileManager: FileManager = .default
     ) throws -> RecordingSession {
         let root = try root ?? defaultRoot(fileManager: fileManager)
-        let directory = root.appending(
-            path: directoryName(for: startedAt),
-            directoryHint: .isDirectory
-        )
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        return RecordingSession(directory: directory, startedAt: startedAt)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let baseName = directoryName(for: startedAt)
+        var suffix = 1
+        while true {
+            let name = suffix == 1 ? baseName : "\(baseName)-\(suffix)"
+            let directory = root.appending(path: name, directoryHint: .isDirectory)
+            do {
+                // Creating the leaf without intermediates is the atomic reservation. Two
+                // starts in the same second must never open the same mic.wav/system.wav.
+                try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
+                return RecordingSession(directory: directory, startedAt: startedAt)
+            } catch let error as CocoaError where error.code == .fileWriteFileExists {
+                suffix += 1
+            }
+        }
     }
 }
