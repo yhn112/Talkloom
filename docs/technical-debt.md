@@ -80,8 +80,10 @@ using it to infer permission state.
   supported macOS version and device, and that two seconds without accepted samples means
   the tap is dead.
 - A mic-only fallback with AEC disabled assumes remote speech is audible through speakers.
-  With headphones, the remote side is absent from the microphone track and the recording
-  must be marked partial/mixed rather than labelled `me`.
+  With headphones, the remote side is absent from the microphone track. The track is now
+  labelled `mixed` in `session.json` instead of passing for `me`, so the merge step can no
+  longer attribute it to the user; how such a session should be transcribed — and whether
+  the user should be warned before recording without the tap at all — is still open.
 - Sample rates are rounded from `Double` to an integer WAV header while the unrounded value
   remains in the summary. Either validate integral rates or use one canonical integer rate.
 
@@ -142,6 +144,9 @@ anchors, then cover device switches with real-device tests.
   unreported diagnostic count.
 - Session creation writes an in-progress manifest before capture starts; normal stop
   replaces it atomically with `completed` or `failed`, and legacy manifests remain readable.
+- Every track declares who is on it — `local`, `remote` or `mixed` — and a session that
+  fell back to the microphone alone carries the reason in `session.json` instead of only in
+  the menu bar, which was gone by the next recording.
 
 ## Intentionally retained complexity
 

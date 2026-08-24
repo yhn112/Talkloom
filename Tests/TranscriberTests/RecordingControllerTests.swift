@@ -8,12 +8,18 @@ final class RecordingControllerTests: XCTestCase {
         let shouldFailStart: Bool
         private(set) var beginCount = 0
         private(set) var endCount = 0
+
+        /// Whether echo cancellation was asked for. The controller decides this from
+        /// whether the system tap came up, and it decides what the microphone track
+        /// contains, so it is the part worth pinning down here.
+        private(set) var lastVoiceProcessing: Bool?
         private var failureHandler: (@Sendable (String) -> Void)?
 
         init(shouldFailStart: Bool = false) { self.shouldFailStart = shouldFailStart }
 
         func begin(writingTo url: URL, voiceProcessing: Bool) async throws {
             beginCount += 1
+            lastVoiceProcessing = voiceProcessing
             if shouldFailStart { throw CocoaError(.fileWriteUnknown) }
         }
 
@@ -32,6 +38,7 @@ final class RecordingControllerTests: XCTestCase {
         let startDelay: Duration
         let endDelay: Duration
         let completion: TrackRecorder.Completion?
+        let shouldFailStart: Bool
         private(set) var beginCount = 0
         private(set) var endCount = 0
         private var failureHandler: (@Sendable (String) -> Void)?
@@ -39,16 +46,19 @@ final class RecordingControllerTests: XCTestCase {
         init(
             startDelay: Duration = .zero,
             endDelay: Duration = .zero,
-            completion: TrackRecorder.Completion? = nil
+            completion: TrackRecorder.Completion? = nil,
+            shouldFailStart: Bool = false
         ) {
             self.startDelay = startDelay
             self.endDelay = endDelay
             self.completion = completion
+            self.shouldFailStart = shouldFailStart
         }
 
         func begin(writingTo url: URL) async throws {
             beginCount += 1
             if startDelay > .zero { try await Task.sleep(for: startDelay) }
+            if shouldFailStart { throw CocoaError(.fileWriteUnknown) }
         }
 
         func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
@@ -82,6 +92,7 @@ final class RecordingControllerTests: XCTestCase {
             summary: TrackRecorder.Summary(
                 label: "system",
                 url: url,
+                content: .remote,
                 sampleRate: 48_000,
                 frameCount: frameCount,
                 peakAmplitude: peakAmplitude,
@@ -228,6 +239,66 @@ final class RecordingControllerTests: XCTestCase {
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
         XCTAssertEqual(manifest.failure, controller.errorMessage)
         XCTAssertEqual(manifest.tracks.first?.failure, controller.errorMessage)
+    }
+
+    /// When the tap does not come up, the session continues on the microphone alone with
+    /// echo cancellation off — which means that recording holds both sides of the call. The
+    /// menu bar says so while the app is open; the manifest has to say so for good, because
+    /// it is what the transcription step will read months later.
+    func testAFallbackToTheMicrophoneAloneIsRecordedInTheManifest() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: FakeSystemAudio(shouldFailStart: true)
+        )
+
+        await controller.start()
+        let session = try XCTUnwrap(controller.currentSession)
+        await controller.stop()
+
+        let voiceProcessing = await microphone.lastVoiceProcessing
+        XCTAssertEqual(voiceProcessing, false, "the remote side is only on the mic track now")
+        XCTAssertNil(controller.errorMessage, "a degraded recording is not a failed one")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let manifest = try decoder.decode(RecordingManifest.self, from: data)
+        XCTAssertEqual(manifest.status, .completed)
+        XCTAssertEqual(manifest.warning, controller.warning)
+        XCTAssertNotNil(manifest.warning)
+    }
+
+    func testASessionThatUsedBothPathsCarriesNoWarning() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: FakeSystemAudio(
+                completion: systemCompletion(at: root.appending(path: "system.wav"))
+            )
+        )
+
+        await controller.start()
+        let session = try XCTUnwrap(controller.currentSession)
+        await controller.stop()
+
+        let voiceProcessing = await microphone.lastVoiceProcessing
+        XCTAssertEqual(voiceProcessing, true)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let manifest = try decoder.decode(RecordingManifest.self, from: data)
+        XCTAssertNil(manifest.warning)
+        XCTAssertEqual(manifest.tracks.first?.content, .remote)
     }
 
     func testSystemAudioIsMarkedWorkingOnlyAfterRecordingSignal() async throws {

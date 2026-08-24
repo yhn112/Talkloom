@@ -67,7 +67,12 @@ final class TrackRecorderTests: XCTestCase {
     func testWritesTheSourceFormatUntouched() async throws {
         let url = directory.appending(path: "mic.wav")
         let sourceRate = 48_000.0
-        let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: sourceRate)
+        let recorder = try TrackRecorder(
+            label: "mic",
+            url: url,
+            sampleRate: sourceRate,
+            content: .local
+        )
         let samples = tone(frequency: 440, amplitude: 0.5, seconds: 1, sampleRate: sourceRate)
 
         await recorder.start()
@@ -95,7 +100,7 @@ final class TrackRecorderTests: XCTestCase {
 
     func testASilentSourceIsReportedAsSilent() async throws {
         let url = directory.appending(path: "silence.wav")
-        let recorder = try TrackRecorder(label: "system", url: url, sampleRate: 48_000)
+        let recorder = try TrackRecorder(label: "system", url: url, sampleRate: 48_000, content: .remote)
 
         await recorder.start()
         let silence = [Float](repeating: 0, count: 48_000)
@@ -111,7 +116,7 @@ final class TrackRecorderTests: XCTestCase {
     /// exactly where the recording was loudest.
     func testFullScaleSamplesDoNotWrap() async throws {
         let url = directory.appending(path: "clipping.wav")
-        let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: 16_000)
+        let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: 16_000, content: .local)
         let samples: [Float] = [1.0, -1.0, 2.0, -2.0, 0.999_99]
 
         await recorder.start()
@@ -128,7 +133,7 @@ final class TrackRecorderTests: XCTestCase {
 
     func testAnUnusableSampleRateIsRejected() {
         let url = directory.appending(path: "bad.wav")
-        XCTAssertThrowsError(try TrackRecorder(label: "mic", url: url, sampleRate: 0))
+        XCTAssertThrowsError(try TrackRecorder(label: "mic", url: url, sampleRate: 0, content: .local))
     }
 
     func testAppendFailureIsReturnedWithThePartialSummary() async throws {
@@ -137,6 +142,7 @@ final class TrackRecorderTests: XCTestCase {
             label: "mic",
             url: directory.appending(path: "failed.wav"),
             sampleRate: 48_000,
+            content: .local,
             writer: writer
         )
         [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
@@ -157,6 +163,7 @@ final class TrackRecorderTests: XCTestCase {
             label: "system",
             url: directory.appending(path: "failed.wav"),
             sampleRate: 48_000,
+            content: .remote,
             writer: writer
         )
         [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {

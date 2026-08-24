@@ -26,6 +26,10 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         /// to this track's first sample. `nil` means the track never received a sample.
         let startOffset: TimeInterval?
 
+        /// Who is on the track. `nil` only in manifests written before the field existed:
+        /// for those recordings it is genuinely unknown, and guessing from the file name
+        /// would reintroduce exactly the claim this field was added to stop making.
+        let content: TrackContent?
     }
 
     let startedAt: Date
@@ -33,20 +37,39 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     let tracks: [Track]
     let failure: String?
 
+    /// Why a session that completed is not the session that was asked for — the system tap
+    /// failing to start, and the microphone therefore recording both sides without echo
+    /// cancellation. It lived only in the menu bar until now, which meant it was gone by the
+    /// next recording, while the file it describes stayed on disk.
+    let warning: String?
+
     static let fileName = "session.json"
 
-    private init(startedAt: Date, status: Status, tracks: [Track], failure: String?) {
+    private init(
+        startedAt: Date,
+        status: Status,
+        tracks: [Track],
+        failure: String?,
+        warning: String?
+    ) {
         self.startedAt = startedAt
         self.status = status
         self.tracks = tracks
         self.failure = failure
+        self.warning = warning
     }
 
     /// Written as soon as the session directory is reserved. If the process dies before
     /// finalization, the directory remains self-identifying rather than looking like a
     /// successful session that mysteriously has no manifest.
     static func recording(startedAt: Date) -> RecordingManifest {
-        RecordingManifest(startedAt: startedAt, status: .recording, tracks: [], failure: nil)
+        RecordingManifest(
+            startedAt: startedAt,
+            status: .recording,
+            tracks: [],
+            failure: nil,
+            warning: nil
+        )
     }
 
     /// Builds a manifest from what the recorders reported, putting the tracks on a common
@@ -55,22 +78,26 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     init(
         startedAt: Date,
         summaries: [TrackRecorder.Summary],
-        failure: String? = nil
+        failure: String? = nil,
+        warning: String? = nil
     ) {
         self.init(
             startedAt: startedAt,
             completions: summaries.map { TrackRecorder.Completion(summary: $0, failure: nil) },
-            failure: failure
+            failure: failure,
+            warning: warning
         )
     }
 
     init(
         startedAt: Date,
         completions: [TrackRecorder.Completion],
-        failure: String? = nil
+        failure: String? = nil,
+        warning: String? = nil
     ) {
         self.startedAt = startedAt
         self.failure = failure
+        self.warning = warning
         status = failure == nil ? .completed : .failed
         let summaries = completions.map(\.summary)
         let origin = summaries.compactMap(\.firstSampleHostTime).min()
@@ -86,7 +113,8 @@ struct RecordingManifest: Codable, Equatable, Sendable {
                 peakAmplitude: summary.peakAmplitude,
                 droppedSampleCount: summary.droppedSampleCount,
                 failure: completion.failure?.localizedDescription,
-                startOffset: offset
+                startOffset: offset,
+                content: summary.content
             )
         }
     }
@@ -98,6 +126,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         startedAt = try container.decode(Date.self, forKey: .startedAt)
         tracks = try container.decode([Track].self, forKey: .tracks)
         failure = try container.decodeIfPresent(String.self, forKey: .failure)
+        warning = try container.decodeIfPresent(String.self, forKey: .warning)
         status = try container.decodeIfPresent(Status.self, forKey: .status)
             ?? (failure == nil ? .completed : .failed)
     }

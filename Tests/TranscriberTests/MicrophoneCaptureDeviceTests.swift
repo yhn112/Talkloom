@@ -39,8 +39,11 @@ final class MicrophoneCaptureDeviceTests: XCTestCase {
         return process
     }
 
-    private func record(voiceProcessing: Bool, to name: String) async throws -> TrackRecorder.Summary {
-        let capture = MicrophoneCapture()
+    private func record(
+        voiceProcessing: Bool,
+        to name: String,
+        using capture: MicrophoneCapture = MicrophoneCapture()
+    ) async throws -> TrackRecorder.Summary {
         let url = directory.appending(path: name)
 
         _ = try await capture.start(writingTo: url, voiceProcessing: voiceProcessing)
@@ -79,6 +82,34 @@ final class MicrophoneCaptureDeviceTests: XCTestCase {
         XCTAssertEqual(file.fileFormat.sampleRate, summary.sampleRate)
         XCTAssertEqual(file.fileFormat.channelCount, 1)
         XCTAssertEqual(file.length, AVAudioFramePosition(summary.frameCount))
+    }
+
+    /// The app keeps one `MicrophoneCapture` for the life of the process, so a mic-only
+    /// fallback and a normal session land on the same object, one after the other. Every
+    /// other test here builds a fresh instance, so nothing covered that sequence — and the
+    /// two modes need different engine graphs, which made it worth pinning down rather than
+    /// assuming. Measured over nine runs: both sessions record, at the device's rate, with
+    /// nothing dropped.
+    ///
+    /// It also pins the labels down. Without cancellation the remote side is in the
+    /// microphone file, and calling that track "me" is what would put other people's words
+    /// in the user's mouth in the transcript.
+    func testAFallbackSessionAndTheNextNormalOneBothRecord() async throws {
+        let capture = MicrophoneCapture()
+
+        let fallback = try await record(voiceProcessing: false, to: "fallback.wav", using: capture)
+        let normal = try await record(voiceProcessing: true, to: "normal.wav", using: capture)
+
+        XCTAssertFalse(fallback.isSilent, "peak was \(fallback.peakAmplitude)")
+        XCTAssertGreaterThan(normal.frameCount, 0, "the second session recorded nothing")
+        XCTAssertEqual(normal.droppedSampleCount, 0)
+        XCTAssertEqual(fallback.content, .mixed)
+        XCTAssertEqual(normal.content, .local)
+
+        // Deliberately no assertion on how much quieter the second track is. Cancellation
+        // converges over the first seconds of a session, so a peak taken across a short
+        // recording measures where the loud syllables happened to fall: the same
+        // configuration measured 0.0057, 0.0064, 0.0078, 0.0835 and 0.6105 over five runs.
     }
 
     /// Echo cancellation has to actually cancel. A canceller that silently does nothing

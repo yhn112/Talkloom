@@ -101,7 +101,12 @@ actor SystemAudioCapture {
             )
         }
 
-        let recorder = try TrackRecorder(label: "system", url: url, sampleRate: sampleRate)
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: url,
+            sampleRate: sampleRate,
+            content: .remote
+        )
         do {
             var running = probe
             try attachAndStart(&running, feeding: recorder.input)

@@ -200,7 +200,12 @@ final class RecordingController {
         logTrackOffset()
         let completions = [tracks.0, tracks.1].compactMap { $0 }
         let finalFailure = failure ?? completions.compactMap(\.failure).first?.localizedDescription
-        writeManifest(for: session, completions: completions, failure: finalFailure)
+        writeManifest(
+            for: session,
+            completions: completions,
+            failure: finalFailure,
+            warning: warning
+        )
 
         if let finalFailure {
             fail(finalFailure)
@@ -224,13 +229,15 @@ final class RecordingController {
     private func writeManifest(
         for session: RecordingSession,
         completions: [TrackRecorder.Completion],
-        failure: String?
+        failure: String?,
+        warning: String?
     ) {
         do {
             try RecordingManifest(
                 startedAt: session.startedAt,
                 completions: completions,
-                failure: failure
+                failure: failure,
+                warning: warning
             )
                 .write(to: session.directory)
         } catch {

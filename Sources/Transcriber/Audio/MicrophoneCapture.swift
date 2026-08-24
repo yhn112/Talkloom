@@ -112,7 +112,14 @@ actor MicrophoneCapture {
             engine.mainMixerNode.outputVolume = 0
         }
 
-        let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: format.sampleRate)
+        // Echo cancellation is what makes this track "me" rather than "the room". Without it
+        // the speakers are in here too, and the manifest has to say so.
+        let recorder = try TrackRecorder(
+            label: "mic",
+            url: url,
+            sampleRate: format.sampleRate,
+            content: voiceProcessing ? .local : .mixed
+        )
         let trackInput = recorder.input
         input.installTap(onBus: 0, bufferSize: Self.tapBufferSize, format: format) { buffer, when in
             // Real-time context: a timestamp store and a copy into a preallocated ring

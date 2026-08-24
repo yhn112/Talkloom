@@ -33,6 +33,11 @@ actor TrackRecorder {
     struct Summary: Sendable {
         let label: String
         let url: URL
+
+        /// Who is on this track. Decided by the capture path that created the recorder,
+        /// since it is the only place that knows whether echo cancellation was applied.
+        let content: TrackContent
+
         let sampleRate: Double
         let frameCount: Int
         let peakAmplitude: Float
@@ -65,6 +70,7 @@ actor TrackRecorder {
 
     let label: String
     let url: URL
+    let content: TrackContent
     let sampleRate: Double
 
     /// The producer's handle. `nonisolated` because an audio callback cannot await.
@@ -105,12 +111,14 @@ actor TrackRecorder {
         label: String,
         url: URL,
         sampleRate: Double,
+        content: TrackContent,
         writer suppliedWriter: (any PCMWriting)? = nil
     ) throws {
         guard sampleRate > 0 else { throw Failure.unsupportedSourceFormat(sampleRate: sampleRate) }
 
         self.label = label
         self.url = url
+        self.content = content
         self.sampleRate = sampleRate
         self.input = TrackInput(ringCapacity: Int(sampleRate * Self.ringHeadroom))
         self.floatScratch = [Float](repeating: 0, count: Self.drainChunkFrames)
@@ -158,6 +166,7 @@ actor TrackRecorder {
             summary: Summary(
                 label: label,
                 url: url,
+                content: content,
                 sampleRate: sampleRate,
                 frameCount: writer.frameCount,
                 peakAmplitude: peak,

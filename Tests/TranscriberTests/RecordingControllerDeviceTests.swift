@@ -58,6 +58,12 @@ final class RecordingControllerDeviceTests: XCTestCase {
         let manifest = try decoder.decode(RecordingManifest.self, from: data)
 
         XCTAssertEqual(Set(manifest.tracks.map(\.file)), ["mic.wav", "system.wav"])
+        // Both paths came up, so the microphone is echo-cancelled and carries the user
+        // alone. Nothing downstream can work that out from the audio, and this is the only
+        // recording of it.
+        XCTAssertEqual(manifest.tracks.first { $0.file == "mic.wav" }?.content, .local)
+        XCTAssertEqual(manifest.tracks.first { $0.file == "system.wav" }?.content, .remote)
+        XCTAssertNil(manifest.warning, "neither path was degraded")
         // The system tap produces its first sample almost at once; voice processing takes
         // the best part of a second to come up. The gap is accepted, but it has to be
         // written down, because nothing in the audio records it.

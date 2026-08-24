@@ -114,6 +114,11 @@ struct MenuBarView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if track.content == .mixed {
+                Text("Echo cancellation was off, so this track carries both sides of the call.")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if track.isClipped {
                 Text("The input clipped — lower the input volume in System Settings › Sound.")
                     .foregroundStyle(.orange)
