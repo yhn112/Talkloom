@@ -69,21 +69,30 @@ final class RecordingController {
             lastSystemTrack = nil
             warning = nil
 
-            try await microphone.start(writingTo: session.microphoneTrackURL)
-
-            // System audio failing is not fatal. Half a meeting is worth far more than
-            // none, and the missing half is stated rather than left to be discovered in the
-            // transcript.
+            // System audio starts first, and whether it worked decides how the microphone
+            // is configured. Echo cancellation removes the other participants from the
+            // microphone track; that is only safe because the tap is recording them
+            // separately. With no system track, cancelling them would erase them from the
+            // only recording there is — so the microphone keeps the speaker bleed instead,
+            // echo and all. A doubled transcript is recoverable; a missing one is not.
+            var systemAudioIsRecording = false
             do {
                 try await systemAudio.start(writingTo: session.systemTrackURL)
                 permissions.setSystemAudio(.granted)
+                systemAudioIsRecording = true
             } catch {
                 permissions.setSystemAudio(.denied)
-                warning = "Recording the microphone only. \(error.localizedDescription)"
+                warning =
+                    "Recording the microphone only, with echo cancellation off so the other participants are still captured through the speakers. \(error.localizedDescription)"
                 AppLog.capture.error(
                     "system audio capture did not start: \(error.localizedDescription, privacy: .public)"
                 )
             }
+
+            try await microphone.start(
+                writingTo: session.microphoneTrackURL,
+                voiceProcessing: systemAudioIsRecording
+            )
 
             state = .recording(session)
             AppLog.capture.info("recording started in \(session.directory.path, privacy: .public)")
@@ -104,6 +113,7 @@ final class RecordingController {
             "recording stopped after \(Date().timeIntervalSince(session.startedAt), format: .fixed(precision: 1), privacy: .public) s"
         )
         logTrackOffset()
+        writeManifest(for: session)
     }
 
     /// How far apart the two tracks actually started.
@@ -115,6 +125,18 @@ final class RecordingController {
             let systemStart = lastSystemTrack?.firstSampleHostTime
         else { return nil }
         return HostTime.seconds(from: microphoneStart, to: systemStart)
+    }
+
+    private func writeManifest(for session: RecordingSession) {
+        let summaries = [lastMicrophoneTrack, lastSystemTrack].compactMap { $0 }
+        guard !summaries.isEmpty else { return }
+        do {
+            try RecordingManifest(startedAt: session.startedAt, summaries: summaries).write(to: session.directory)
+        } catch {
+            AppLog.capture.error(
+                "could not write the session manifest: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func logTrackOffset() {

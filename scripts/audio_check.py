@@ -19,7 +19,10 @@ import sys
 import numpy as np
 import soundfile as sf
 
-EXPECTED_RATE = 16_000
+# The canonical ASR rate. Masters are recorded at whatever the device reports and are
+# converted to this afterwards, so a master above it is correct, not a defect — only a rate
+# *below* it costs information that no later step can recover.
+ASR_RATE = 16_000
 EXPECTED_CHANNELS = 1
 
 # Below this peak a track is effectively silence: inaudible, and useless for ASR.
@@ -80,8 +83,8 @@ def analyse(path: str) -> list[str]:
     elif silent_ratio > SUSPICIOUS_SILENT_RATIO:
         problems.append(f"{path}: {silent_ratio * 100:.1f}% silence, almost no signal")
 
-    if rate != EXPECTED_RATE:
-        problems.append(f"{path}: {rate} Hz instead of {EXPECTED_RATE} Hz")
+    if rate < ASR_RATE:
+        problems.append(f"{path}: {rate} Hz is below the {ASR_RATE} Hz ASR needs")
     if channels != EXPECTED_CHANNELS:
         problems.append(f"{path}: {channels} channels instead of {EXPECTED_CHANNELS}")
     if clipped > frames * 0.001:

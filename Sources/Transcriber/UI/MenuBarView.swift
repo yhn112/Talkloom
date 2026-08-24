@@ -102,6 +102,10 @@ struct MenuBarView: View {
                 Text("The input clipped — lower the input volume in System Settings › Sound.")
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if track.isTooLoud {
+                Text("The input came within a decibel of clipping — consider lowering the input volume.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if track.droppedSampleCount > 0 {
                 Text("\(track.droppedSampleCount) samples were dropped; the recording has gaps.")

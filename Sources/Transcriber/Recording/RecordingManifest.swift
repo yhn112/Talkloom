@@ -1,0 +1,60 @@
+import Foundation
+
+/// What a finished recording consists of, written next to the tracks as `session.json`.
+///
+/// The tracks do not start together — the microphone's echo canceller takes the best part
+/// of a second to produce its first sample, while the tap produces one immediately — so
+/// merging them by timestamp needs the offset, and the offset is not in the audio. Keeping
+/// it here rather than only in the log means the recording explains itself to whatever
+/// reads it next, including the analysis scripts.
+struct RecordingManifest: Codable, Equatable, Sendable {
+    struct Track: Codable, Equatable, Sendable {
+        let file: String
+        let sampleRate: Double
+        let frameCount: Int
+        let peakAmplitude: Float
+        let droppedSampleCount: Int
+
+        /// Seconds from the recording's origin — the earliest first sample of any track —
+        /// to this track's first sample. Zero for whichever track started first.
+        let startOffset: TimeInterval
+
+        var duration: TimeInterval { Double(frameCount) / sampleRate }
+    }
+
+    let startedAt: Date
+    let tracks: [Track]
+
+    static let fileName = "session.json"
+
+    /// Builds a manifest from what the recorders reported, putting the tracks on a common
+    /// timeline. Tracks that never received a sample carry an offset of zero, since there
+    /// is nothing to align.
+    init(startedAt: Date, summaries: [TrackRecorder.Summary]) {
+        self.startedAt = startedAt
+        let origin = summaries.compactMap(\.firstSampleHostTime).min()
+        tracks = summaries.map { summary in
+            let offset =
+                if let origin, let first = summary.firstSampleHostTime {
+                    HostTime.seconds(from: origin, to: first)
+                } else {
+                    TimeInterval(0)
+                }
+            return Track(
+                file: summary.url.lastPathComponent,
+                sampleRate: summary.sampleRate,
+                frameCount: summary.frameCount,
+                peakAmplitude: summary.peakAmplitude,
+                droppedSampleCount: summary.droppedSampleCount,
+                startOffset: offset
+            )
+        }
+    }
+
+    func write(to directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(self).write(to: directory.appending(path: Self.fileName), options: .atomic)
+    }
+}

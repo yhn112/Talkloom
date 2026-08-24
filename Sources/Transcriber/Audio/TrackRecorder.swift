@@ -51,6 +51,11 @@ actor TrackRecorder {
         /// speakers. The result is a distorted recording, which ASR handles badly, so it is
         /// worth saying out loud rather than leaving to be noticed by ear.
         var isClipped: Bool { peakAmplitude > 1 }
+
+        /// Within a decibel of full scale. Not clipped yet, and one loud sentence away from
+        /// it — measured at -0.6 dBFS on a normal speaking voice, which the clipping check
+        /// above passes silently.
+        var isTooLoud: Bool { peakAmplitude >= 0.891 }
     }
 
     let label: String

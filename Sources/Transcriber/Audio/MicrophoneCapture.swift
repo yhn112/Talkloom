@@ -54,9 +54,14 @@ actor MicrophoneCapture {
 
     /// Starts capture into `url` and returns the format the device actually delivered.
     ///
-    /// - Parameter voiceProcessing: echo cancellation. On by default and meant to stay on;
-    ///   the switch exists so its effect can be measured against a recording made without
-    ///   it, which is the only way to tell a working canceller from a silent one.
+    /// - Parameter voiceProcessing: echo cancellation.
+    ///
+    ///   Turning it off is not merely a diagnostic. Cancellation removes the other
+    ///   participants from the microphone track, and that is only safe while the process tap
+    ///   is recording them separately — the two subsystems know nothing about each other, so
+    ///   nothing guarantees that what is subtracted here survives anywhere else. When the tap
+    ///   is not running, this must be off, or the meeting's other half is erased from the
+    ///   only recording that exists.
     @discardableResult
     func start(
         writingTo url: URL,
@@ -168,6 +173,10 @@ actor MicrophoneCapture {
         if summary.isClipped {
             AppLog.capture.error(
                 "microphone input clipped at \(summary.peakAmplitude, format: .fixed(precision: 2), privacy: .public); lower the input volume in System Settings › Sound"
+            )
+        } else if summary.isTooLoud {
+            AppLog.capture.notice(
+                "microphone input peaked at \(summary.peakAmplitude, format: .fixed(precision: 3), privacy: .public), within a decibel of clipping; consider lowering the input volume"
             )
         }
         return summary

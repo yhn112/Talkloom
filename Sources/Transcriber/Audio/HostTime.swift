@@ -15,6 +15,12 @@ enum HostTime {
         return info
     }()
 
+    /// Host ticks for a duration in seconds. The inverse of `seconds(from:to:)`, and only
+    /// needed to build a known interval in tests.
+    static func hostTicks(forSeconds seconds: TimeInterval) -> UInt64 {
+        UInt64(seconds * 1_000_000_000 * Double(timebase.denom) / Double(timebase.numer))
+    }
+
     /// Seconds from `start` to `end`. Negative when `end` came first.
     static func seconds(from start: UInt64, to end: UInt64) -> TimeInterval {
         let ticks = Double(end) - Double(start)

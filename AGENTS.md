@@ -192,6 +192,21 @@ inspect duration and **peak amplitude of both tracks** (skill `audio-doctor`).
 An ASR change is not an improvement without a measurement on both the Russian and
 English fixtures (skill `asr-eval`). "Sounds better" is not a result.
 
+### Ask the user to make the sound
+
+`say` and `afplay` are enough to prove that a track is not silent, and not much more. They
+cannot produce a real voice in a real room, a real call with a real remote party, or the
+device changes that happen mid-meeting. The user is at the machine and has offered to
+play audio, speak into the microphone, and take part in comparisons — so ask, rather than
+extending a synthetic harness until it almost answers the question.
+
+Ask for something specific and reproducible: what to play, what to say, how long, and what
+the recording is meant to settle. Then analyse the files and report numbers.
+
+Synthetic audio still has its place: a constant tone of known amplitude is what makes an
+absolute level measurable at all, and it caught a resampler losing 6% of a recording. Use
+it for arithmetic, and a person for anything that has to sound like a meeting.
+
 ## Skills and delegation
 
 Reusable project skills have one source of truth under `.agents/skills/`. Codex discovers
