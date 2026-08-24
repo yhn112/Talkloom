@@ -94,7 +94,15 @@ Several opt-in XCTest cases are measurement experiments rather than regression t
 - startup timing tests mostly print timings without acceptance assertions;
 - the voice-processing layout test prints per-channel measurements but proves only that
   channel zero is non-silent;
-- the ducking test exhaustively plays all hardware-dependent configurations.
+- the ducking test exhaustively plays all hardware-dependent configurations;
+- `testVoiceProcessingSuppressesTheSpeakers` compares peak amplitude with and without
+  cancellation, and peak across a four-second recording is not a measure of cancellation.
+  The canceller converges over the first seconds of a session, so the peak reports where
+  the loud syllables happened to fall: the same configuration measured 0.0057, 0.0064,
+  0.0078, 0.0835 and 0.6105 across five runs, and a single-engine variant of the same test
+  produced 0.0076, 0.0588, 0.2783 and 1.0000. The test passes today by luck. Measure a
+  settled RMS over a window that starts after convergence, the way the ducking table in
+  `system-audio-capture.md` already does.
 
 Move exploratory measurements into a manual diagnostics or benchmark target. Keep the
 device scheme focused on short end-to-end invariants: both paths start, contain meaningful
