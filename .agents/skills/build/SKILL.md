@@ -8,6 +8,19 @@ description: Build, sign, and launch Transcriber.app, run the tests, and read th
 `.xcodeproj` is a generated artifact in this project. The source of truth is
 `project.yml`, so the cycle always starts with generation, never with opening the project.
 
+## The short version
+
+```bash
+scripts/check.sh
+```
+
+Regenerates the project, checks formatting, builds, and runs the hardware-free tests —
+about six seconds, one line per step, non-zero exit on the first failure. Use it for
+every ordinary change; the steps below are for when something needs to be done by hand,
+and for running the app.
+
+If it reports a formatting failure, `scripts/format.sh` fixes it.
+
 ## Steps
 
 1. **Generate the project** whenever `project.yml` changed or files were added to or
@@ -23,10 +36,15 @@ description: Build, sign, and launch Transcriber.app, run the tests, and read th
 
    ```bash
    xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
-     -configuration Debug -derivedDataPath build build
+     -configuration Debug -derivedDataPath build build 2>&1 | xcsift -f toon -E
    ```
 
    The bundle lands at `build/Build/Products/Debug/Transcriber.app`.
+
+   `xcsift` turns xcodebuild's output into a few lines of errors with file and line —
+   measured at 98 kB against 127 bytes for a green test run. `-E` is not optional: a
+   pipeline reports the exit status of its last command, so without it a failed build
+   comes back as success. `-w` adds the list of warnings rather than just their count.
 
 3. **Launch.** Kill the previous instance first — two simultaneous captures produce
    garbage in both recordings:
@@ -55,11 +73,11 @@ description: Build, sign, and launch Transcriber.app, run the tests, and read th
 
 ```bash
 xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
-  -derivedDataPath build test
+  -derivedDataPath build test 2>&1 | xcsift -f toon -w -E
 ```
 
-`xcodebuild` output is verbose. When diagnosing failures, search for `error:` and
-`Test Case '-[...]' failed` rather than reading the whole log.
+This is what `scripts/check.sh` runs, so prefer the script unless a single test is being
+chased down.
 
 ### Tests that use the real microphone
 
@@ -75,6 +93,11 @@ xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceTests \
 They record from the microphone and speak out loud for a few seconds. They print the
 measured rate, duration, peak amplitude and dropped-sample count for each track — those
 numbers are what a capture commit has to carry.
+
+**Do not pipe these through `xcsift`.** It reports pass and fail counts and discards the
+tests' console output, which for a device test is the entire point: the measurements
+would be summarised away and the commit would have no numbers to carry. Read the raw
+output here, or `tee` it to a file.
 
 A separate scheme rather than an environment variable on the command line: `xcodebuild`
 does not forward the shell's environment to the test host, so `TRANSCRIBER_DEVICE_TESTS`

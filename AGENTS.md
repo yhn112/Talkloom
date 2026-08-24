@@ -19,7 +19,8 @@ is about the chat, and never about what goes into a file.
   (`scripts/make-signing-cert.sh`). It stays stable across builds, so granted
   permissions survive rebuilds — ad-hoc signatures do not.
 - Python tooling (ASR evaluation, recording analysis) lives in `.venv` at the repo root.
-- Available: `ffmpeg`, `afconvert`, `say`, `brew`, `uv`.
+- Available: `ffmpeg`, `afconvert`, `say`, `brew`, `uv`, `xcodegen`, `xcsift`.
+- `swift-format` comes from the Xcode toolchain (`xcrun swift-format`), not from Homebrew.
 
 ## Rules
 
@@ -260,6 +261,7 @@ the failure mode it has to rule out is a valid file full of silence.
 
 ### Before committing
 
+- `scripts/check.sh` must pass.
 - `git status` must show no generated artifacts. `Transcriber.xcodeproj`, `build/`,
   `.venv/`, models, and recordings are ignored by `.gitignore`; if one shows up anyway,
   fix `.gitignore` rather than working around it.
@@ -276,6 +278,14 @@ Commits written by an agent carry a `Co-Authored-By` trailer that identifies the
 It is there for transparency about who wrote what; drop this rule if it is unwanted.
 
 ## What counts as verified
+
+`scripts/check.sh` is the gate for everything that does not need hardware: it regenerates
+the project, checks formatting, builds, and runs the hardware-free tests, and it exits
+non-zero on the first failure. Run it before saying a change is done. It takes about six
+seconds, so there is no reason to skip it.
+
+A green run there is not the same as working capture. It is compatible with a valid WAV
+of the right duration containing pure silence, which is this project's signature failure.
 
 Capture code is not working until it has been checked against a real recording.
 Compiling proves nothing: the signature failure here is a valid `.wav` of the right
