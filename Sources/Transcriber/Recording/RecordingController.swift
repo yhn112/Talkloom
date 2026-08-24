@@ -17,9 +17,15 @@ final class RecordingController {
     /// amplitude is the only thing that distinguishes a real recording from a valid file
     /// full of silence, and finding that out a day later is too late.
     private(set) var lastMicrophoneTrack: TrackRecorder.Summary?
+    private(set) var lastSystemTrack: TrackRecorder.Summary?
+
+    /// Something went wrong that did not stop the recording — in practice, system audio
+    /// failing while the microphone kept going.
+    private(set) var warning: String?
 
     let permissions: PermissionManager
     private let microphone = MicrophoneCapture()
+    private let systemAudio = SystemAudioCapture()
 
     init(permissions: PermissionManager = PermissionManager()) {
         self.permissions = permissions
@@ -60,9 +66,25 @@ final class RecordingController {
         do {
             let session = try RecordingSession.create()
             lastMicrophoneTrack = nil
-            // Stage 1 starts the system-audio process tap here, writing to
-            // session.systemTrackURL.
+            lastSystemTrack = nil
+            warning = nil
+
             try await microphone.start(writingTo: session.microphoneTrackURL)
+
+            // System audio failing is not fatal. Half a meeting is worth far more than
+            // none, and the missing half is stated rather than left to be discovered in the
+            // transcript.
+            do {
+                try await systemAudio.start(writingTo: session.systemTrackURL)
+                permissions.setSystemAudio(.granted)
+            } catch {
+                permissions.setSystemAudio(.denied)
+                warning = "Recording the microphone only. \(error.localizedDescription)"
+                AppLog.capture.error(
+                    "system audio capture did not start: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+
             state = .recording(session)
             AppLog.capture.info("recording started in \(session.directory.path, privacy: .public)")
         } catch {
@@ -74,9 +96,31 @@ final class RecordingController {
     func stop() async {
         guard let session = currentSession else { return }
         state = .idle
+
         lastMicrophoneTrack = await microphone.stop()
+        lastSystemTrack = await systemAudio.stop()
+
         AppLog.capture.info(
             "recording stopped after \(Date().timeIntervalSince(session.startedAt), format: .fixed(precision: 1), privacy: .public) s"
+        )
+        logTrackOffset()
+    }
+
+    /// How far apart the two tracks actually started.
+    ///
+    /// The streams do not begin together — the tap waits for a process to make a sound —
+    /// so segments have to be merged on this offset rather than on a shared zero.
+    var trackOffset: TimeInterval? {
+        guard let microphoneStart = lastMicrophoneTrack?.firstSampleHostTime,
+            let systemStart = lastSystemTrack?.firstSampleHostTime
+        else { return nil }
+        return HostTime.seconds(from: microphoneStart, to: systemStart)
+    }
+
+    private func logTrackOffset() {
+        guard let offset = trackOffset else { return }
+        AppLog.capture.notice(
+            "system audio started \(offset, format: .fixed(precision: 3), privacy: .public) s after the microphone"
         )
     }
 }

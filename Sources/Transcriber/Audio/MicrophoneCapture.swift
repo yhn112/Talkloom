@@ -95,8 +95,12 @@ actor MicrophoneCapture {
 
         let recorder = try TrackRecorder(label: "mic", url: url, sampleRate: format.sampleRate)
         let trackInput = recorder.input
-        input.installTap(onBus: 0, bufferSize: Self.tapBufferSize, format: format) { buffer, _ in
-            // Real-time context: this only copies into a preallocated ring buffer.
+        input.installTap(onBus: 0, bufferSize: Self.tapBufferSize, format: format) { buffer, when in
+            // Real-time context: a timestamp store and a copy into a preallocated ring
+            // buffer, nothing else.
+            if when.isHostTimeValid {
+                trackInput.noteFirstHostTime(when.hostTime)
+            }
             trackInput.write(buffer)
         }
 

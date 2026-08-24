@@ -24,6 +24,16 @@ struct MenuBarView: View {
             if let track = controller.lastMicrophoneTrack {
                 trackRow(track)
             }
+            if let track = controller.lastSystemTrack {
+                trackRow(track)
+            }
+
+            if let warning = controller.warning {
+                Text(warning)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let message = controller.errorMessage {
                 Text(message)

@@ -38,6 +38,10 @@ actor TrackRecorder {
         let peakAmplitude: Float
         let droppedSampleCount: Int
 
+        /// Mach host time of the track's first sample. Tracks are merged against each
+        /// other on this, not on the moment the user pressed record.
+        let firstSampleHostTime: UInt64?
+
         var duration: TimeInterval { Double(frameCount) / sampleRate }
         var isSilent: Bool { peakAmplitude < 0.001 }
 
@@ -130,7 +134,8 @@ actor TrackRecorder {
             sampleRate: sampleRate,
             frameCount: writer.frameCount,
             peakAmplitude: peak,
-            droppedSampleCount: input.droppedSampleCount
+            droppedSampleCount: input.droppedSampleCount,
+            firstSampleHostTime: input.firstSampleHostTime
         )
     }
 

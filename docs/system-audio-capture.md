@@ -78,7 +78,10 @@ distinguished by which list the dictionary sits in, not by the key itself.
 
 `kAudioAggregateDeviceTapAutoStartKey` makes `AudioDeviceStart` wait until a tapped process
 actually produces audio. The header states it **requires the private key to also be set**
-(`AudioHardware.h:1637`–`:1644`).
+(`AudioHardware.h:1637`–`:1644`). This project sets it to **false**: waiting means the first
+sample lands whenever something happens to play, leaving the beginning of the meeting
+unaccounted for. Measured against a four-second recording that began 1.7 s before playback
+started, auto-start produced a 2.35 s track; with it off, 3.99 s.
 
 Create with `AudioHardwareCreateAggregateDevice(CFDictionaryRef, AudioObjectID*)`
 (`AudioHardware.h:667`) and tear down with `AudioHardwareDestroyAggregateDevice`
@@ -110,20 +113,68 @@ the system object, with scope `kAudioObjectPropertyScopeGlobal` (`'glob'`,
 `AudioHardwareBase.h:207`). Plugging in headphones changes the default output and tears
 down the aggregate, so the tap has to be rebuilt in response.
 
+## The aggregate holds the tap and nothing else
+
+Published examples, Apple's included, also list the current default output device as
+`kAudioAggregateDeviceMainSubDeviceKey` and as the single entry of
+`kAudioAggregateDeviceSubDeviceListKey`, to give the aggregate a time source. That works,
+and it costs more than it gives.
+
+An aggregate built that way carries the output device's own input stream as well as the
+tap's, and the IO block then receives a buffer list with more than one buffer — with no
+reliable way to tell from the list which buffer is the tap. Measured on this machine, with
+Voice Processing IO active on the microphone at the same time:
+
+| Aggregate | Buffer list delivered |
+| --- | --- |
+| tap + default output device, no voice processing | 1 buffer, 1 channel, 2048 bytes |
+| tap + default output device, voice processing on | 2 buffers, **first has 6 channels**, 12288 bytes |
+| tap alone | 1 buffer, 1 channel, 2048 bytes |
+
+Reading the two-buffer case as a single stream — the obvious reading, since the tap is
+mono — scaled the track's length by six and filled it with the output device's audio
+instead of the tap's. Nothing reported an error: the file was valid, the sample rate was
+right, and only its duration gave it away.
+
+With no sub-device the list is always one buffer, and it is the tap. The aggregate also
+stops depending on the default output device, which is what made the published recipe
+fragile when headphones were plugged in.
+
+## A tap that dies reports nothing
+
+The documented failure is that changing the default output device tears the aggregate
+down. Listening for `kAudioHardwarePropertyDefaultOutputDevice` addresses that one cause
+and no other, and it forces a rebuild — a gap in the recording — every time the device
+changes, whether or not the tap was affected.
+
+Watching the tap's own output covers every cause and costs nothing. With auto-start off the
+tap delivers frames continuously, silence included, so a stream that produces nothing for a
+couple of seconds has stopped. That is the signal this project rebuilds on.
+
 ## Call sequence
 
 1. Build a `CATapDescription` (mono global, empty exclusion list); set `privateTap`.
 2. `AudioHardwareCreateProcessTap` → tap `AudioObjectID`.
 3. Read `kAudioTapPropertyFormat` from the tap.
-4. Compose the aggregate dictionary: private, `"taps"` holding one entry keyed by
-   `"uid"` with the description's `UUID` string, and `"tapautostart"` if wanted.
+4. Compose the aggregate dictionary: private, not stacked, an empty `"subdevices"` list,
+   `"tapautostart"` false, and `"taps"` holding one entry keyed by `"uid"` with the
+   description's `UUID` string plus `"drift"`.
 5. `AudioHardwareCreateAggregateDevice`.
 6. `AudioDeviceCreateIOProcIDWithBlock`, then `AudioDeviceStart`.
 7. On teardown, reverse it: stop, destroy the IOProcID, destroy the aggregate, destroy the tap.
 
+## What the tap reports
+
+Measured on macOS 26.6, built-in output, `initMonoGlobalTapButExcludeProcesses` with an
+empty exclusion list: `kAudioTapPropertyFormat` returns 48000 Hz, 1 channel, 4 bytes per
+frame, 1 frame per packet, flags `0x9` — that is `kAudioFormatFlagIsFloat |
+kAudioFormatFlagIsPacked`, so packed interleaved Float32. Read it anyway rather than
+assuming it; a device that reports something else will hand over exactly what it said.
+
 ## Not confirmed from headers
 
 The headers say nothing about TCC. The permission is expected to be
-`kTCCServiceAudioCapture` with `NSAudioCaptureUsageDescription` in `Info.plist`, and signing
-is expected to matter, but none of that is stated in the SDK — it needs an experiment on a
-real build, which stage 1 will provide. Treat it as unverified until then.
+`kTCCServiceAudioCapture` with `NSAudioCaptureUsageDescription` in `Info.plist`. A signed
+build does record system audio successfully, so the path works end to end, but what happens
+when the grant is *absent* has not been exercised here — whether the tap fails to create or
+quietly produces silence is still unverified, and the error message assumes the former.

@@ -74,11 +74,12 @@ survive rebuilds.
   (available since macOS 14.2).
 - Write two files in the device's own format; resampling to 16 kHz happens later, over
   the finished file, never on the audio path.
-- Known traps: Voice Processing IO silently reports a different channel layout, which
-  makes a mono-configured `AVAudioConverter` emit silence instead of failing; automatic
-  ducking quiets the other participants unless
-  `voiceProcessingOtherAudioDuckingConfiguration` disables it; the tap dies when the
-  default output device changes (headphones plugged in) and must be rebuilt.
+- Known traps, all of which present as a valid file rather than as an error: Voice
+  Processing IO reports nine channels where the device has one; automatic ducking quiets
+  the other participants unless `voiceProcessingOtherAudioDuckingConfiguration` disables
+  it; an aggregate device that contains the output device as well as the tap delivers two
+  streams and the tap is not the first; a tap that has died goes on producing a valid,
+  silent file. See `docs/system-audio-capture.md` for the measurements.
 - ✅ Done when: after a call, two clean tracks exist on disk, verified by measured peak
   amplitude on each — not by file size.
 

@@ -52,6 +52,11 @@ final class AudioRingBuffer: @unchecked Sendable {
         droppedCursor.destroy()
     }
 
+    /// Every sample the producer has ever written. Only ever increases, so a value that
+    /// stops moving means the producer stopped — which is what a dead audio device looks
+    /// like from this side, since nothing reports one.
+    var totalSampleCount: Int { writeCursor.load(ordering: .acquiring) }
+
     /// Samples waiting to be read.
     var availableToRead: Int {
         writeCursor.load(ordering: .acquiring) - readCursor.load(ordering: .relaxed)
