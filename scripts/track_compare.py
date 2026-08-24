@@ -60,6 +60,8 @@ def load(session: Path) -> tuple[dict, dict[str, np.ndarray], int]:
         elif file_rate != rate:
             raise SystemExit(f"tracks differ in sample rate: {rate} vs {file_rate}")
         # Pad the front by the track's own offset so index 0 is the same instant in both.
+        if entry["startOffset"] is None:
+            raise SystemExit(f"{entry['file']} has no first-sample timestamp and cannot be aligned")
         lead = int(round(entry["startOffset"] * file_rate))
         tracks[entry["file"]] = np.concatenate([np.zeros(lead, dtype="float32"), data.mean(axis=1)])
     length = max(track.size for track in tracks.values())

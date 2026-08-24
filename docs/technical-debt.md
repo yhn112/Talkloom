@@ -17,8 +17,6 @@ offline transcription is built on top of capture. It is not a second product roa
 
 ### P0 — persist a truthful timeline
 
-- Store an absent first-sample timestamp as unknown, not as offset zero. Zero currently
-  means both "this was the earliest track" and "this track never started".
 - Write a session skeleton early and checkpoint first-sample timestamps. Repairing a WAV
   header after a crash cannot reconstruct track alignment if all timing existed only in
   memory.

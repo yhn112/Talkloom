@@ -61,9 +61,11 @@ final class RecordingControllerDeviceTests: XCTestCase {
         // The system tap produces its first sample almost at once; voice processing takes
         // the best part of a second to come up. The gap is accepted, but it has to be
         // written down, because nothing in the audio records it.
-        let offsets = manifest.tracks.map(\.startOffset)
+        let offsets = manifest.tracks.compactMap(\.startOffset)
         XCTAssertEqual(offsets.min(), 0, "the earliest track defines the origin")
-        let micOffset = try XCTUnwrap(manifest.tracks.first { $0.file == "mic.wav" }?.startOffset)
+        let micOffset = try XCTUnwrap(
+            manifest.tracks.first { $0.file == "mic.wav" }?.startOffset
+        )
         print("  microphone starts \(String(format: "%.3f", micOffset)) s after the system tap")
         XCTAssertGreaterThan(micOffset, 0)
         XCTAssertLessThan(micOffset, 5)

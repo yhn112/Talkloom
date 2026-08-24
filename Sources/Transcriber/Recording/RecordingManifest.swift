@@ -16,8 +16,8 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         let droppedSampleCount: Int
 
         /// Seconds from the recording's origin — the earliest first sample of any track —
-        /// to this track's first sample. Zero for whichever track started first.
-        let startOffset: TimeInterval
+        /// to this track's first sample. `nil` means the track never received a sample.
+        let startOffset: TimeInterval?
 
     }
 
@@ -27,18 +27,15 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     static let fileName = "session.json"
 
     /// Builds a manifest from what the recorders reported, putting the tracks on a common
-    /// timeline. Tracks that never received a sample carry an offset of zero, since there
-    /// is nothing to align.
+    /// timeline. Tracks that never received a sample carry no offset because there is
+    /// nothing to align.
     init(startedAt: Date, summaries: [TrackRecorder.Summary]) {
         self.startedAt = startedAt
         let origin = summaries.compactMap(\.firstSampleHostTime).min()
         tracks = summaries.map { summary in
-            let offset =
-                if let origin, let first = summary.firstSampleHostTime {
-                    HostTime.seconds(from: origin, to: first)
-                } else {
-                    TimeInterval(0)
-                }
+            let offset = summary.firstSampleHostTime.flatMap { first in
+                origin.map { HostTime.seconds(from: $0, to: first) }
+            }
             return Track(
                 file: summary.url.lastPathComponent,
                 sampleRate: summary.sampleRate,

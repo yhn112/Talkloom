@@ -34,19 +34,19 @@ final class RecordingManifestTests: XCTestCase {
         let mic = try XCTUnwrap(manifest.tracks.first { $0.file == "mic.wav" })
         let system = try XCTUnwrap(manifest.tracks.first { $0.file == "system.wav" })
         XCTAssertEqual(system.startOffset, 0, "the earliest track defines the origin")
-        XCTAssertEqual(mic.startOffset, 0.75, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(mic.startOffset), 0.75, accuracy: 0.001)
     }
 
     /// A track that never received a sample cannot be aligned, and must not drag the
     /// origin somewhere arbitrary.
-    func testATrackThatNeverStartedGetsAZeroOffset() throws {
+    func testATrackThatNeverStartedGetsNoOffset() throws {
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 0),
             summaries: [summary("mic", hostTime: 5_000), summary("system", hostTime: nil)]
         )
 
         let system = try XCTUnwrap(manifest.tracks.first { $0.file == "system.wav" })
-        XCTAssertEqual(system.startOffset, 0)
+        XCTAssertNil(system.startOffset)
         XCTAssertEqual(try XCTUnwrap(manifest.tracks.first { $0.file == "mic.wav" }).startOffset, 0)
     }
 
