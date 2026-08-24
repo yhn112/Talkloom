@@ -256,16 +256,20 @@ The dependency only points one way. `TranscriberCore` must not learn what a
 
 ### Tests
 
-New tests are written with Swift Testing — `@Suite`, `@Test`, `#expect`, `#require`. The
-existing XCTest suites are not worth a migration commit of their own; convert one when a
-change touches it anyway. Both frameworks run side by side in the same test target.
+Tests are Swift Testing — `@Suite`, `@Test`, `#expect`, `#require`. There is no XCTest
+left in the project; add some only for what Swift Testing cannot express, which here means
+`measure` blocks and UI automation, and say why in the file.
 
-The reason is parameterization. A table — header fields, ducking configurations, sample
-rates — becomes one `@Test(arguments:)` where every row is a named case, instead of a
-dozen assertions in one test whose failure names only the test. `WAVWriterTests` is the
-example to copy.
+Prefer a table to a repeated test. Header fields, memory layouts, legacy manifest shapes:
+one `@Test(arguments:)` where every row is a named case beats a dozen assertions in one
+test whose failure names only the test. `WAVWriterTests` is the example to copy. A test
+whose assertion is about the whole table — the ducking ranking — stays one test.
 
-XCTest stays where Swift Testing has no answer: `measure` blocks and UI automation.
+Anything touching audio hardware belongs under the `DeviceTests` suite, whatever file it
+lives in. That suite is `.serialized`, and it has to be: Swift Testing runs tests in
+parallel by default, while the microphone, the process tap and the default output device
+are exclusive. It also carries the opt-in condition and a time limit, so no suite repeats
+either.
 
 ### Permissions (TCC)
 
