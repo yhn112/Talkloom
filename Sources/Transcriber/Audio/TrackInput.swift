@@ -9,10 +9,8 @@ import CoreAudio
 /// that is a bounded loop over the block, and a lock-free ring buffer. No allocation, no
 /// locks, no file I/O, no `await`.
 ///
-/// The downmix happens here, on the real-time side, on purpose. The canonical format is
-/// mono, and doing it here means `AVAudioConverter` downstream is only ever asked to
-/// change the sample rate, never the channel count — which is the configuration that
-/// silently emits silence when Voice Processing IO reports an unexpected channel layout.
+/// The downmix happens here, on the real-time side, because the master is mono in the
+/// source sample rate. Resampling happens only after the finished file is closed.
 ///
 /// `@unchecked Sendable`: the ring buffer carries its own justification, and `scratch` is
 /// allocated in `init`, freed in `deinit`, and only ever touched by the single audio thread

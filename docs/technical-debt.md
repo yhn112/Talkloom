@@ -1,18 +1,12 @@
 # Technical debt and simplification opportunities
 
-This document records known design and implementation debt that should be resolved before
+This document records current design and implementation debt that should be resolved before
 offline transcription is built on top of capture. It is not a second product roadmap:
-`PLAN.md` owns product stages, while this file owns concrete cleanup and correctness work
-found during review of `feat/audio-capture` at `c2e34ab` plus its working-tree changes.
+`PLAN.md` owns product stages, while this file owns concrete cleanup and correctness work.
 
 ## Priorities
 
-### P0 — make capture lifecycle explicit
-
-Transactional startup, explicit `starting`/`stopping` states, and capture-to-controller
-runtime failure events are implemented on the audio-capture branch. A startup failure rolls
-back both paths, and a runtime failure finalizes both tracks before the UI reports failure.
-The remaining lifecycle work is:
+### P0 — make capture health explicit
 
 - Do not infer the system-audio TCC state from successful tap creation. A tap may start and
   still deliver silence; enabling microphone AEC in that state can remove the remote side
@@ -21,14 +15,8 @@ The remaining lifecycle work is:
   spread across `RecordingController.State`, `warning`, permission state, last summaries,
   and the capture actors' optional recorders, and those sources can disagree.
 
-### P0 — keep the recorded timeline truthful
+### P0 — persist a truthful timeline
 
-- A first-sample timestamp is sufficient only for uninterrupted capture. A tap rebuild or
-  microphone restart removes time from the WAV and shifts every later ASR timestamp.
-- Until discontinuities are represented, prefer stopping the session visibly on a dead
-  capture path over silently rebuilding into the same file.
-- Before supporting recovery, define either silence padding derived from host time or a
-  timeline made of spans with their own host-time anchors.
 - Store an absent first-sample timestamp as unknown, not as offset zero. Zero currently
   means both "this was the earliest track" and "this track never started".
 - Write a session skeleton early and checkpoint first-sample timestamps. Repairing a WAV
@@ -53,20 +41,6 @@ The remaining lifecycle work is:
 - Make capture `start()` methods return only data a caller actually consumes. Their current
   format/sample-rate return values are ignored by production code and duplicate the final
   summary.
-- Remove comments that still describe an `AVAudioConverter` or resampling in the drain
-  consumer. Capture now writes a native-rate mono Int16 master and resamples offline.
-
-### Reduce self-healing until it can be correct
-
-The MVP now applies the smaller policy:
-
-1. detect a stopped path;
-2. report it to the controller;
-3. stop and finalize the whole session;
-4. show the failure to the user.
-
-Reintroduce seamless recovery only with discontinuity-aware metadata and device-switch
-tests.
 
 ### Give CoreAudio resources one owner
 
@@ -151,6 +125,23 @@ narrow:
 In particular, remove remaining claims that capture writes 16 kHz files or uses a live
 converter. The master is mono Int16 at the source sample rate; the 16 kHz ASR copy is an
 offline derivative.
+
+## Deferred recovery
+
+Capture currently stops and finalizes the whole session when either path dies. Seamless
+recovery is intentionally deferred: before appending a restarted path, define either
+silence padding derived from host time or a timeline made of spans with their own host-time
+anchors, then cover device switches with real-device tests.
+
+## Resolved during the Stage 1 audit
+
+- Recording startup is transactional, and explicit `starting`/`stopping` states reject
+  overlapping UI operations.
+- Capture actors report runtime failures to the controller; neither actor silently rebuilds
+  or restarts into an existing WAV.
+- Session directories are atomically reserved, so starts in the same second cannot truncate
+  each other's tracks.
+- The unused ScreenCaptureKit linkage and dead recorder/manifest properties were removed.
 
 ## Intentionally retained complexity
 

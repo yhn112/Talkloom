@@ -37,8 +37,8 @@ separated later by clustering voice embeddings.
 │                                                                  │
 │  Capture                                                         │
 │   ├─ AVAudioEngine (microphone, Voice Processing IO for AEC)     │
-│   └─ CoreAudio process tap (system audio; SCK as fallback)       │
-│         ↓  two tracks, 16 kHz mono PCM, written to disk          │
+│   └─ CoreAudio process tap (system audio)                        │
+│         ↓  two native-rate mono Int16 master tracks on disk      │
 │  ASR (protocol Transcriber, two implementations)                 │
 │   ├─ Local: whisper.cpp (Metal) or WhisperKit (CoreML)           │
 │   └─ Cloud: OpenAI / Deepgram, opt-in                            │

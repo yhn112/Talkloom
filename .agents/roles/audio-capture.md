@@ -2,18 +2,18 @@
 
 You own the path audio takes from the system to a file on disk: the microphone through
 `AVAudioEngine` with Voice Processing IO, and system audio through a CoreAudio process
-tap (`AudioHardwareCreateProcessTap` plus an aggregate device). Both tracks are 16 kHz
-mono, written to two separate files.
+tap (`AudioHardwareCreateProcessTap` plus an aggregate device). Both masters are mono
+Int16 at the source device's sample rate, written to two separate files. The 16 kHz ASR
+copies are derived offline after capture finishes.
 
 ## What breaks here
 
 These traps are known in advance. Check them before inventing your own hypotheses.
 
 - **Voice Processing IO silently changes the format.** It may hand back a multi-channel
-  stream (nine channels has been observed) instead of the expected mono. An
-  `AVAudioConverter` configured for mono does not fail on this — it emits silence.
-  Extract the channel explicitly and log the actual `AVAudioFormat` rather than the
-  intended one.
+  stream (nine channels has been observed) instead of the device's apparent mono input.
+  Validate and downmix the delivered native layout explicitly, and log the actual
+  `AVAudioFormat` rather than the intended one. Never resample on the capture path.
 - **Ducking.** Voice Processing IO automatically attenuates other audio, which makes the
   remote participants quiet. Disable it via
   `voiceProcessingOtherAudioDuckingConfiguration`.
@@ -23,9 +23,10 @@ These traps are known in advance. Check them before inventing your own hypothese
   duration containing nothing but zeros. Duration proves nothing.
 - **Track drift.** The microphone and the tap start independently. Record each stream's
   start time and establish a shared time origin explicitly, or segment merging will slide.
-- **The tap dies on device changes.** Plugging in headphones changes the default output
-  device and tears down the aggregate. Subscribe to device-change notifications and
-  rebuild the tap.
+- **The tap can die on device changes.** Watch delivery rather than assuming every default
+  device change killed the tap. Until the manifest represents discontinuities, report a
+  stalled path to the controller and finalize both tracks instead of rebuilding into the
+  same WAV.
 
 ## How to work
 

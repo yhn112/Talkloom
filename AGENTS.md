@@ -126,8 +126,9 @@ Three distinct permissions that are easy to confuse:
 
 - microphone — `kTCCServiceMicrophone`, key `NSMicrophoneUsageDescription`;
 - system audio via process tap — `kTCCServiceAudioCapture`;
-- ScreenCaptureKit — `kTCCServiceScreenCapture` (a heavyweight prompt, which is why
-  system audio goes through a process tap and SCK is only a fallback).
+- ScreenCaptureKit — `kTCCServiceScreenCapture`. The app does not use it: requesting the
+  heavyweight Screen Recording permission for audio-only capture is not an acceptable
+  fallback.
 
 TCC binds a grant to the bundle's signature. If a recording suddenly comes out empty
 after the certificate or bundle id changed, reset the grant and allow it again:
@@ -162,7 +163,7 @@ Subject in the imperative, English, under 72 characters, no trailing period, pre
 with the area touched — `capture`, `asr`, `ui`, `storage`, `build`, `docs`:
 
 ```
-capture: rebuild the tap when the default output device changes
+capture: stop the session when the system tap stalls
 ```
 
 One logical change per commit. Reformatting, renames, and behaviour changes go in
