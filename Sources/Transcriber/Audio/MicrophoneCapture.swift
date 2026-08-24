@@ -150,7 +150,7 @@ actor MicrophoneCapture {
     }
 
     /// Stops capture and closes the file.
-    func stop() async -> TrackRecorder.Summary? {
+    func stop() async -> TrackRecorder.Completion? {
         guard let recorder else { return nil }
         self.recorder = nil
         runtimeFailureHandler = nil
@@ -170,7 +170,8 @@ actor MicrophoneCapture {
         // nothing either way, so the only thing switching it off achieved was the crash,
         // and leaving it on makes the next recording start sooner.
 
-        let summary = await recorder.finish()
+        let completion = await recorder.finish()
+        let summary = completion.summary
         AppLog.capture.notice(
             "microphone track: \(summary.duration, format: .fixed(precision: 1), privacy: .public) s, peak \(summary.peakAmplitude, format: .fixed(precision: 4), privacy: .public), dropped \(summary.droppedSampleCount, privacy: .public) samples"
         )
@@ -186,7 +187,7 @@ actor MicrophoneCapture {
                 "microphone input peaked at \(summary.peakAmplitude, format: .fixed(precision: 3), privacy: .public), within a decibel of clipping; consider lowering the input volume"
             )
         }
-        return summary
+        return completion
     }
 
     /// Plugging in headphones changes the default device and stops the engine underneath us.

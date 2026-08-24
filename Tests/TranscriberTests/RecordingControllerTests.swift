@@ -21,7 +21,7 @@ final class RecordingControllerTests: XCTestCase {
             failureHandler = handler
         }
 
-        func end() -> TrackRecorder.Summary? {
+        func end() -> TrackRecorder.Completion? {
             endCount += 1
             failureHandler = nil
             return nil
@@ -31,13 +31,19 @@ final class RecordingControllerTests: XCTestCase {
     private actor FakeSystemAudio: SystemAudioCapturing {
         let startDelay: Duration
         let endDelay: Duration
+        let completion: TrackRecorder.Completion?
         private(set) var beginCount = 0
         private(set) var endCount = 0
         private var failureHandler: (@Sendable (String) -> Void)?
 
-        init(startDelay: Duration = .zero, endDelay: Duration = .zero) {
+        init(
+            startDelay: Duration = .zero,
+            endDelay: Duration = .zero,
+            completion: TrackRecorder.Completion? = nil
+        ) {
             self.startDelay = startDelay
             self.endDelay = endDelay
+            self.completion = completion
         }
 
         func begin(writingTo url: URL) async throws {
@@ -49,11 +55,11 @@ final class RecordingControllerTests: XCTestCase {
             failureHandler = handler
         }
 
-        func end() async -> TrackRecorder.Summary? {
+        func end() async -> TrackRecorder.Completion? {
             endCount += 1
             if endDelay > .zero { try? await Task.sleep(for: endDelay) }
             failureHandler = nil
-            return nil
+            return completion
         }
 
         func fail(_ message: String) { failureHandler?(message) }
@@ -64,6 +70,21 @@ final class RecordingControllerTests: XCTestCase {
             .appending(path: "RecordingControllerTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+
+    private func failedSystemCompletion(at url: URL) -> TrackRecorder.Completion {
+        TrackRecorder.Completion(
+            summary: TrackRecorder.Summary(
+                label: "system",
+                url: url,
+                sampleRate: 48_000,
+                frameCount: 24_000,
+                peakAmplitude: 0.5,
+                droppedSampleCount: 0,
+                firstSampleHostTime: 1_000
+            ),
+            failure: .writeFailed(label: "system", reason: "disk full")
+        )
     }
 
     func testMicrophoneStartFailureRollsBackSystemCapture() async throws {
@@ -126,6 +147,7 @@ final class RecordingControllerTests: XCTestCase {
             systemAudio: system
         )
         await controller.start()
+        let session = try XCTUnwrap(controller.currentSession)
 
         await system.fail("device disappeared")
         for _ in 0..<20 where controller.errorMessage == nil {
@@ -137,6 +159,11 @@ final class RecordingControllerTests: XCTestCase {
         XCTAssertEqual(controller.errorMessage, "System audio capture stopped: device disappeared")
         XCTAssertEqual(microphoneEndCount, 1)
         XCTAssertEqual(systemEndCount, 1)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let manifest = try decoder.decode(RecordingManifest.self, from: data)
+        XCTAssertEqual(manifest.failure, controller.errorMessage)
     }
 
     func testStartDuringStopIsIgnored() async throws {
@@ -163,5 +190,31 @@ final class RecordingControllerTests: XCTestCase {
         XCTAssertEqual(systemBeginCount, 1)
         XCTAssertFalse(controller.isRecording)
         XCTAssertNil(controller.errorMessage)
+    }
+
+    func testTrackWriteFailureFailsSessionAndPersistsPartialTrack() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let expectedURL = root.appending(path: "partial-system.wav")
+        let system = FakeSystemAudio(completion: failedSystemCompletion(at: expectedURL))
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: system
+        )
+        await controller.start()
+        let session = try XCTUnwrap(controller.currentSession)
+
+        await controller.stop()
+
+        XCTAssertEqual(controller.errorMessage, "The system track could not write audio: disk full")
+        XCTAssertEqual(controller.lastSystemTrack?.frameCount, 24_000)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try Data(contentsOf: session.directory.appending(path: RecordingManifest.fileName))
+        let manifest = try decoder.decode(RecordingManifest.self, from: data)
+        XCTAssertEqual(manifest.failure, controller.errorMessage)
+        XCTAssertEqual(manifest.tracks.first?.failure, controller.errorMessage)
     }
 }

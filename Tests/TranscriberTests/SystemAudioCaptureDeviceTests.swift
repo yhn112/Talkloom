@@ -60,7 +60,7 @@ final class SystemAudioCaptureDeviceTests: XCTestCase {
         try await Task.sleep(for: .seconds(4))
         playback.terminate()
         let stopped = await capture.stop()
-        let summary = try XCTUnwrap(stopped)
+        let summary = try XCTUnwrap(stopped).summary
         report(summary)
 
         XCTAssertGreaterThan(sampleRate, 0)
@@ -95,8 +95,8 @@ final class SystemAudioCaptureDeviceTests: XCTestCase {
 
         let stoppedMicrophone = await microphone.stop()
         let stoppedSystem = await systemAudio.stop()
-        let microphoneTrack = try XCTUnwrap(stoppedMicrophone)
-        let systemTrack = try XCTUnwrap(stoppedSystem)
+        let microphoneTrack = try XCTUnwrap(stoppedMicrophone).summary
+        let systemTrack = try XCTUnwrap(stoppedSystem).summary
         report(microphoneTrack)
         report(systemTrack)
 

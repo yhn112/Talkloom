@@ -47,8 +47,8 @@ final class MicrophoneCaptureDeviceTests: XCTestCase {
         let speech = speakThroughTheSpeakers()
         try await Task.sleep(for: .seconds(4))
         speech.terminate()
-        let summary = await capture.stop()
-        let result = try XCTUnwrap(summary)
+        let stopped = await capture.stop()
+        let result = try XCTUnwrap(stopped).summary
         // Printed because these numbers are the verification: a commit touching capture has
         // to carry the measured peak per track, not the assertion that it compiled.
         print(

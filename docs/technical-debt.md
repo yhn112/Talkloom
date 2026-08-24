@@ -10,7 +10,9 @@ offline transcription is built on top of capture. It is not a second product roa
 
 - Do not infer the system-audio TCC state from successful tap creation. A tap may start and
   still deliver silence; enabling microphone AEC in that state can remove the remote side
-  from the only usable track.
+  from the only usable track. The signed controller device test reproduced this exact
+  ambiguity: two runs produced system peaks of 0.3291 and 0.0000 respectively, while both
+  files had the expected duration and reported no dropped frames.
 - Represent one active session and its two track states in one place. The current state is
   spread across `RecordingController.State`, `warning`, permission state, last summaries,
   and the capture actors' optional recorders, and those sources can disagree.
@@ -20,17 +22,6 @@ offline transcription is built on top of capture. It is not a second product roa
 - Write a session skeleton early and checkpoint first-sample timestamps. Repairing a WAV
   header after a crash cannot reconstruct track alignment if all timing existed only in
   memory.
-
-### P0 — surface failures instead of returning success-shaped data
-
-- Persist the first WAV append or finalization error and return it through capture stop and
-  the controller. A peak measured before a failed disk write is not evidence that the file
-  is usable.
-- Treat unexpected runtime buffer layouts as a track failure, not as an indefinitely
-  growing count of silently discarded blocks.
-- Preserve partial-track summaries and failure metadata when a capture actor stops early.
-  Do not omit an existing partial file from `session.json` merely because a later `stop()`
-  returns `nil`.
 
 ## Simplification opportunities
 
@@ -140,6 +131,11 @@ anchors, then cover device switches with real-device tests.
 - Session directories are atomically reserved, so starts in the same second cannot truncate
   each other's tracks.
 - The unused ScreenCaptureKit linkage and dead recorder/manifest properties were removed.
+- WAV append and finalization failures propagate through capture stop to the controller.
+  Partial summaries describe only successfully written frames, and both track-level and
+  session-level failures are preserved in `session.json`.
+- Unexpected system-audio buffer layouts fail the track instead of accumulating as an
+  unreported diagnostic count.
 
 ## Intentionally retained complexity
 

@@ -58,6 +58,11 @@ actor TrackRecorder {
         var isTooLoud: Bool { peakAmplitude >= 0.891 }
     }
 
+    struct Completion: Sendable {
+        let summary: Summary
+        let failure: Failure?
+    }
+
     let label: String
     let url: URL
     let sampleRate: Double
@@ -65,20 +70,30 @@ actor TrackRecorder {
     /// The producer's handle. `nonisolated` because an audio callback cannot await.
     nonisolated let input: TrackInput
 
-    private let writer: WAVWriter
+    private let writer: any PCMWriting
     private var floatScratch: [Float]
     private var intScratch: [Int16]
     private var peak: Float = 0
     private var drainTask: Task<Void, Never>?
     private var isFinished = false
+    private var firstFailure: Failure?
 
-    enum Failure: Error, LocalizedError {
+    enum Failure: Error, LocalizedError, Sendable {
         case unsupportedSourceFormat(sampleRate: Double)
+        case writeFailed(label: String, reason: String)
+        case finalizationFailed(label: String, reason: String)
+        case unexpectedBufferLayout(label: String, blockCount: Int)
 
         var errorDescription: String? {
             switch self {
             case .unsupportedSourceFormat(let sampleRate):
                 "The audio source reported an unusable sample rate (\(sampleRate) Hz)."
+            case .writeFailed(let label, let reason):
+                "The \(label) track could not write audio: \(reason)"
+            case .finalizationFailed(let label, let reason):
+                "The \(label) track could not finalize its WAV header: \(reason)"
+            case .unexpectedBufferLayout(let label, let blockCount):
+                "The \(label) track received \(blockCount) unsupported audio block(s)."
             }
         }
     }
@@ -86,7 +101,12 @@ actor TrackRecorder {
     /// - Parameter sampleRate: the rate the callback actually delivers, read from the device
     ///   rather than assumed. Assuming it is the mistake that yields a file of the right
     ///   length playing back at the wrong speed.
-    init(label: String, url: URL, sampleRate: Double) throws {
+    init(
+        label: String,
+        url: URL,
+        sampleRate: Double,
+        writer suppliedWriter: (any PCMWriting)? = nil
+    ) throws {
         guard sampleRate > 0 else { throw Failure.unsupportedSourceFormat(sampleRate: sampleRate) }
 
         self.label = label
@@ -98,7 +118,8 @@ actor TrackRecorder {
         // Int16 at the device's rate, not Float32: it is the format every downstream tool
         // reads without argument, and 16 bits is some 90 dB of headroom below anything a
         // meeting recording resolves.
-        self.writer = try WAVWriter(url: url, sampleRate: Int(sampleRate.rounded()), channelCount: 1)
+        self.writer = try suppliedWriter
+            ?? WAVWriter(url: url, sampleRate: Int(sampleRate.rounded()), channelCount: 1)
     }
 
     /// Starts draining. Safe to call before the producer has delivered anything.
@@ -116,36 +137,39 @@ actor TrackRecorder {
     ///
     /// The caller must have stopped the producer first: anything written after this point
     /// stays in the ring buffer and never reaches disk.
-    func finish() async -> Summary {
+    func finish() async -> Completion {
         if let drainTask {
             drainTask.cancel()
             await drainTask.value
         }
         drainTask = nil
 
-        drain()
+        if firstFailure == nil { drain() }
         isFinished = true
         do {
             try writer.finish()
         } catch {
-            AppLog.capture.error(
-                "\(self.label, privacy: .public): could not finalize the WAV header: \(error.localizedDescription, privacy: .public)"
+            recordFailure(
+                .finalizationFailed(label: label, reason: error.localizedDescription)
             )
         }
 
-        return Summary(
-            label: label,
-            url: url,
-            sampleRate: sampleRate,
-            frameCount: writer.frameCount,
-            peakAmplitude: peak,
-            droppedSampleCount: input.droppedSampleCount,
-            firstSampleHostTime: input.firstSampleHostTime
+        return Completion(
+            summary: Summary(
+                label: label,
+                url: url,
+                sampleRate: sampleRate,
+                frameCount: writer.frameCount,
+                peakAmplitude: peak,
+                droppedSampleCount: input.droppedSampleCount,
+                firstSampleHostTime: input.firstSampleHostTime
+            ),
+            failure: firstFailure
         )
     }
 
     private func drain() {
-        guard !isFinished else { return }
+        guard !isFinished, firstFailure == nil else { return }
         let capacity = floatScratch.count
 
         while true {
@@ -154,9 +178,10 @@ actor TrackRecorder {
             }
             guard read > 0 else { return }
 
+            var chunkPeak: Float = 0
             for index in 0..<read {
                 let sample = floatScratch[index]
-                peak = max(peak, abs(sample))
+                chunkPeak = max(chunkPeak, abs(sample))
                 intScratch[index] = Self.int16(from: sample)
             }
 
@@ -165,15 +190,22 @@ actor TrackRecorder {
                     try writer.append(UnsafeBufferPointer(start: $0.baseAddress!, count: read))
                 }
             } catch {
-                AppLog.capture.error(
-                    "\(self.label, privacy: .public): could not write samples: \(error.localizedDescription, privacy: .public)"
+                recordFailure(
+                    .writeFailed(label: label, reason: error.localizedDescription)
                 )
                 return
             }
+            peak = max(peak, chunkPeak)
 
             // A short read means the ring is empty; the rest arrives on the next pass.
             if read < capacity { return }
         }
+    }
+
+    private func recordFailure(_ failure: Failure) {
+        guard firstFailure == nil else { return }
+        firstFailure = failure
+        AppLog.capture.error("\(failure.localizedDescription, privacy: .public)")
     }
 
     /// Float32 in `[-1, 1]` to Int16.

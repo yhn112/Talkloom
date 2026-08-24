@@ -10,7 +10,13 @@ import Foundation
 /// Not thread-safe and deliberately not `Sendable`: it belongs to the single consumer that
 /// drains a ring buffer. Nothing here may be called from an audio callback — it does file
 /// I/O on every call.
-final class WAVWriter {
+protocol PCMWriting: AnyObject {
+    var frameCount: Int { get }
+    func append(_ samples: UnsafeBufferPointer<Int16>) throws
+    func finish() throws
+}
+
+final class WAVWriter: PCMWriting {
     /// Byte length of a canonical PCM WAV header: RIFF chunk, `fmt ` chunk, `data` header.
     private static let headerByteCount = 44
 
@@ -53,11 +59,11 @@ final class WAVWriter {
     /// decoder reads it as empty. Call it on every exit path, including failures.
     func finish() throws {
         guard let handle else { return }
-        self.handle = nil
         let dataByteCount = frameCount * channelCount * MemoryLayout<Int16>.size
         try handle.seek(toOffset: 0)
         try handle.write(contentsOf: Self.header(sampleRate: sampleRate, channelCount: channelCount, dataByteCount: dataByteCount))
         try handle.close()
+        self.handle = nil
     }
 
     deinit {

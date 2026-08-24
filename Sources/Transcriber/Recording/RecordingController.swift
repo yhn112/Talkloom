@@ -4,13 +4,13 @@ import Observation
 protocol MicrophoneCapturing: Sendable {
     func begin(writingTo url: URL, voiceProcessing: Bool) async throws
     func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
-    func end() async -> TrackRecorder.Summary?
+    func end() async -> TrackRecorder.Completion?
 }
 
 protocol SystemAudioCapturing: Sendable {
     func begin(writingTo url: URL) async throws
     func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async
-    func end() async -> TrackRecorder.Summary?
+    func end() async -> TrackRecorder.Completion?
 }
 
 extension MicrophoneCapture: MicrophoneCapturing {
@@ -18,7 +18,7 @@ extension MicrophoneCapture: MicrophoneCapturing {
         _ = try await start(writingTo: url, voiceProcessing: voiceProcessing)
     }
 
-    func end() async -> TrackRecorder.Summary? { await stop() }
+    func end() async -> TrackRecorder.Completion? { await stop() }
 }
 
 extension SystemAudioCapture: SystemAudioCapturing {
@@ -26,7 +26,7 @@ extension SystemAudioCapture: SystemAudioCapturing {
         _ = try await start(writingTo: url)
     }
 
-    func end() async -> TrackRecorder.Summary? { await stop() }
+    func end() async -> TrackRecorder.Completion? { await stop() }
 }
 
 /// Owns the complete lifecycle of one recording. UI state and cleanup eligibility are the
@@ -189,17 +189,19 @@ final class RecordingController {
         async let microphoneTrack = microphone.end()
         async let systemTrack = systemAudio.end()
         let tracks = await (microphoneTrack, systemTrack)
-        lastMicrophoneTrack = tracks.0
-        lastSystemTrack = tracks.1
+        lastMicrophoneTrack = tracks.0?.summary
+        lastSystemTrack = tracks.1?.summary
 
         AppLog.capture.info(
             "recording stopped after \(Date().timeIntervalSince(session.startedAt), format: .fixed(precision: 1), privacy: .public) s"
         )
         logTrackOffset()
-        writeManifest(for: session)
+        let completions = [tracks.0, tracks.1].compactMap { $0 }
+        let finalFailure = failure ?? completions.compactMap(\.failure).first?.localizedDescription
+        writeManifest(for: session, completions: completions, failure: finalFailure)
 
-        if let failure {
-            fail(failure)
+        if let finalFailure {
+            fail(finalFailure)
         } else {
             state = .idle
         }
@@ -217,11 +219,18 @@ final class RecordingController {
         return HostTime.seconds(from: microphoneStart, to: systemStart)
     }
 
-    private func writeManifest(for session: RecordingSession) {
-        let summaries = [lastMicrophoneTrack, lastSystemTrack].compactMap { $0 }
-        guard !summaries.isEmpty else { return }
+    private func writeManifest(
+        for session: RecordingSession,
+        completions: [TrackRecorder.Completion],
+        failure: String?
+    ) {
         do {
-            try RecordingManifest(startedAt: session.startedAt, summaries: summaries).write(to: session.directory)
+            try RecordingManifest(
+                startedAt: session.startedAt,
+                completions: completions,
+                failure: failure
+            )
+                .write(to: session.directory)
         } catch {
             AppLog.capture.error(
                 "could not write the session manifest: \(error.localizedDescription, privacy: .public)"

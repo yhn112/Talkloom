@@ -14,6 +14,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
         let frameCount: Int
         let peakAmplitude: Float
         let droppedSampleCount: Int
+        let failure: String?
 
         /// Seconds from the recording's origin — the earliest first sample of any track —
         /// to this track's first sample. `nil` means the track never received a sample.
@@ -23,16 +24,36 @@ struct RecordingManifest: Codable, Equatable, Sendable {
 
     let startedAt: Date
     let tracks: [Track]
+    let failure: String?
 
     static let fileName = "session.json"
 
     /// Builds a manifest from what the recorders reported, putting the tracks on a common
     /// timeline. Tracks that never received a sample carry no offset because there is
     /// nothing to align.
-    init(startedAt: Date, summaries: [TrackRecorder.Summary]) {
+    init(
+        startedAt: Date,
+        summaries: [TrackRecorder.Summary],
+        failure: String? = nil
+    ) {
+        self.init(
+            startedAt: startedAt,
+            completions: summaries.map { TrackRecorder.Completion(summary: $0, failure: nil) },
+            failure: failure
+        )
+    }
+
+    init(
+        startedAt: Date,
+        completions: [TrackRecorder.Completion],
+        failure: String? = nil
+    ) {
         self.startedAt = startedAt
+        self.failure = failure
+        let summaries = completions.map(\.summary)
         let origin = summaries.compactMap(\.firstSampleHostTime).min()
-        tracks = summaries.map { summary in
+        tracks = completions.map { completion in
+            let summary = completion.summary
             let offset = summary.firstSampleHostTime.flatMap { first in
                 origin.map { HostTime.seconds(from: $0, to: first) }
             }
@@ -42,6 +63,7 @@ struct RecordingManifest: Codable, Equatable, Sendable {
                 frameCount: summary.frameCount,
                 peakAmplitude: summary.peakAmplitude,
                 droppedSampleCount: summary.droppedSampleCount,
+                failure: completion.failure?.localizedDescription,
                 startOffset: offset
             )
         }

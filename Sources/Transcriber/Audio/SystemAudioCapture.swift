@@ -133,7 +133,7 @@ actor SystemAudioCapture {
     }
 
     /// Stops capture and closes the file.
-    func stop() async -> TrackRecorder.Summary? {
+    func stop() async -> TrackRecorder.Completion? {
         guard let recorder else { return nil }
         self.recorder = nil
         runtimeFailureHandler = nil
@@ -155,7 +155,14 @@ actor SystemAudioCapture {
                 "the system audio device delivered \(refused, privacy: .public) block(s) in an unexpected layout, and they were dropped; the last was \(shape.buffers, privacy: .public) buffer(s) of \(shape.channels, privacy: .public) channel(s)"
             )
         }
-        let summary = await recorder.finish()
+        var completion = await recorder.finish()
+        if refused > 0, completion.failure == nil {
+            completion = TrackRecorder.Completion(
+                summary: completion.summary,
+                failure: .unexpectedBufferLayout(label: "system audio", blockCount: refused)
+            )
+        }
+        let summary = completion.summary
         AppLog.capture.notice(
             "system audio track: \(summary.duration, format: .fixed(precision: 1), privacy: .public) s, peak \(summary.peakAmplitude, format: .fixed(precision: 4), privacy: .public), dropped \(summary.droppedSampleCount, privacy: .public) samples"
         )
@@ -164,7 +171,7 @@ actor SystemAudioCapture {
                 "system audio track is silent; nothing was playing, or the Audio Recording permission is missing"
             )
         }
-        return summary
+        return completion
     }
 
     // MARK: - Building the tap
@@ -306,6 +313,14 @@ actor SystemAudioCapture {
     /// it covers every cause, and nothing else reports it: the file simply goes quiet.
     private func checkForStall() async {
         guard let recorder, tap != nil else { return }
+
+        let refused = recorder.input.unexpectedLayoutCount
+        if refused > 0 {
+            reportRuntimeFailure(
+                "The system audio tap delivered \(refused) unsupported buffer block(s)."
+            )
+            return
+        }
 
         let received = recorder.input.ring.totalSampleCount
         if received > lastObservedSampleCount {

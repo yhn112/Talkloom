@@ -4,6 +4,24 @@ import XCTest
 @testable import Transcriber
 
 final class TrackRecorderTests: XCTestCase {
+    private final class FailingWriter: PCMWriting {
+        enum Mode { case append, finish }
+
+        let mode: Mode
+        private(set) var frameCount = 0
+
+        init(_ mode: Mode) { self.mode = mode }
+
+        func append(_ samples: UnsafeBufferPointer<Int16>) throws {
+            if case .append = mode { throw CocoaError(.fileWriteOutOfSpace) }
+            frameCount += samples.count
+        }
+
+        func finish() throws {
+            if case .finish = mode { throw CocoaError(.fileWriteUnknown) }
+        }
+    }
+
     private var directory = URL(fileURLWithPath: "/dev/null")
 
     override func setUpWithError() throws {
@@ -59,7 +77,7 @@ final class TrackRecorderTests: XCTestCase {
             block.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: block.count) }
             try await Task.sleep(for: .milliseconds(2))
         }
-        let summary = await recorder.finish()
+        let summary = await recorder.finish().summary
 
         XCTAssertEqual(summary.droppedSampleCount, 0, "the consumer kept up")
         // Not "close to": nothing on this path is allowed to lose a frame.
@@ -82,7 +100,7 @@ final class TrackRecorderTests: XCTestCase {
         await recorder.start()
         let silence = [Float](repeating: 0, count: 48_000)
         silence.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: silence.count) }
-        let summary = await recorder.finish()
+        let summary = await recorder.finish().summary
 
         XCTAssertTrue(summary.isSilent)
         XCTAssertEqual(summary.peakAmplitude, 0, accuracy: 0.0001)
@@ -98,7 +116,7 @@ final class TrackRecorderTests: XCTestCase {
 
         await recorder.start()
         samples.withUnsafeBufferPointer { _ = recorder.input.ring.write($0.baseAddress!, count: samples.count) }
-        let summary = await recorder.finish()
+        let summary = await recorder.finish().summary
 
         XCTAssertEqual(summary.frameCount, samples.count)
         let data = try Data(contentsOf: url).subdata(in: 44..<(44 + samples.count * 2))
@@ -111,6 +129,45 @@ final class TrackRecorderTests: XCTestCase {
     func testAnUnusableSampleRateIsRejected() {
         let url = directory.appending(path: "bad.wav")
         XCTAssertThrowsError(try TrackRecorder(label: "mic", url: url, sampleRate: 0))
+    }
+
+    func testAppendFailureIsReturnedWithThePartialSummary() async throws {
+        let writer = FailingWriter(.append)
+        let recorder = try TrackRecorder(
+            label: "mic",
+            url: directory.appending(path: "failed.wav"),
+            sampleRate: 48_000,
+            writer: writer
+        )
+        [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+
+        let completion = await recorder.finish()
+
+        XCTAssertEqual(completion.summary.frameCount, 0)
+        XCTAssertEqual(completion.summary.peakAmplitude, 0)
+        XCTAssertNotNil(completion.failure)
+        XCTAssertTrue(completion.failure?.localizedDescription.contains("could not write audio") == true)
+    }
+
+    func testFinalizationFailureIsReturnedWithTheWrittenSummary() async throws {
+        let writer = FailingWriter(.finish)
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "failed.wav"),
+            sampleRate: 48_000,
+            writer: writer
+        )
+        [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
+            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+        }
+
+        let completion = await recorder.finish()
+
+        XCTAssertEqual(completion.summary.frameCount, 1_000)
+        XCTAssertNotNil(completion.failure)
+        XCTAssertTrue(completion.failure?.localizedDescription.contains("WAV header") == true)
     }
 
     /// The producer's downmix. Two channels in, one averaged channel out — and the

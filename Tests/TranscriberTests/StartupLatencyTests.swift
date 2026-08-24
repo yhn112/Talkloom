@@ -78,8 +78,8 @@ final class StartupLatencyTests: XCTestCase {
             try await Task.sleep(for: .seconds(2))
             let stoppedMicrophone = await microphone.stop()
             let stoppedSystem = await systemAudio.stop()
-            let micTrack = try XCTUnwrap(stoppedMicrophone)
-            let systemTrack = try XCTUnwrap(stoppedSystem)
+            let micTrack = try XCTUnwrap(stoppedMicrophone).summary
+            let systemTrack = try XCTUnwrap(stoppedSystem).summary
 
             let systemFirst = try XCTUnwrap(systemTrack.firstSampleHostTime)
             let microphoneFirst = try XCTUnwrap(micTrack.firstSampleHostTime)
@@ -148,7 +148,7 @@ final class StartupLatencyTests: XCTestCase {
         _ = try await microphone.start(writingTo: directory.appending(path: "second.wav"))
         try await Task.sleep(for: .milliseconds(500))
         let stopped = await microphone.stop()
-        let second = try XCTUnwrap(stopped)
+        let second = try XCTUnwrap(stopped).summary
         XCTAssertGreaterThan(second.frameCount, 0)
     }
 

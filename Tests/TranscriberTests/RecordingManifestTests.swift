@@ -58,7 +58,8 @@ final class RecordingManifestTests: XCTestCase {
 
         let manifest = RecordingManifest(
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            summaries: [summary("mic", hostTime: 1_000), summary("system", hostTime: 1_000)]
+            summaries: [summary("mic", hostTime: 1_000), summary("system", hostTime: 1_000)],
+            failure: "capture stopped"
         )
         try manifest.write(to: directory)
 
