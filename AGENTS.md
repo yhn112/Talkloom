@@ -93,6 +93,12 @@ Those projects solved different problems; their structure is noise here. Decisio
 from this project's requirements and from verified facts about this environment. Read
 another repository only when the user points at it explicitly.
 
+The user has explicitly approved `tobi/recorder` as an upstream implementation to consult
+before designing overlapping work. Its reviewed components, compatibility boundaries and
+reuse procedure live in `docs/upstream-recorder.md`. Use that map to avoid repeating its
+design exploration, but do not treat another application's observations as SDK guarantees
+or let its different product choices override this project's invariants.
+
 ### Work in short, evidence-driven cycles
 
 Before implementing a non-trivial change, write down the decision that makes the change

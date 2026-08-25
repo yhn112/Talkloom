@@ -141,6 +141,8 @@ building Stage 2 on top of the recorded timeline.
 ## References
 - WhisperX — the reference ASR + diarization pipeline.
 - Meetily, OpenWhispr — open-source equivalents worth reading.
+- Recorder — a close native macOS implementation; the component-level reuse assessment is
+  in [`docs/upstream-recorder.md`](docs/upstream-recorder.md).
 - recall.ai engineering blog — surveys of macOS audio capture APIs.
 - A 100% local macOS transcriber built on whisper.cpp and ScreenCaptureKit (dev.to) —
   source of the Stage 1 traps listed above.

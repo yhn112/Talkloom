@@ -1,0 +1,87 @@
+# Recorder upstream reuse assessment
+
+[`tobi/recorder`](https://github.com/tobi/recorder) is an explicitly approved upstream
+implementation for features that overlap Transcriber. This assessment covers commit
+[`f1b5c7455074253605ae6d55b0ef89f34efa3011`](https://github.com/tobi/recorder/commit/f1b5c7455074253605ae6d55b0ef89f34efa3011),
+reviewed on 2026-08-25. The repository is MIT-licensed; its copyright and permission notice
+must accompany any substantial copied portion.
+
+The purpose of this reference is to skip repeated discovery, not repeated verification.
+Before building an overlapping feature, read the relevant upstream file and the row below.
+Prefer adapting a compatible implementation or interaction pattern over designing another
+project-specific subsystem. Still verify unfamiliar system APIs against the installed SDK,
+and run the Transcriber check required for the layer being changed. Another application's
+source is evidence about that application, not a platform guarantee or a measurement of this
+one.
+
+If upstream changes materially, record the newly reviewed commit here and update only the
+affected rows. Do not re-audit unrelated components. If code rather than an idea is copied,
+record the upstream file and commit in the change and add its MIT notice to a repository-level
+third-party notice in the same change.
+
+## Component map
+
+| Upstream component | Reuse posture | Transcriber boundary |
+|---|---|---|
+| `CalendarAccess.swift` | Adapt when Stage 6 starts | The long-lived `EKEventStore`, focused event window, change observation and attendee hints are useful. Verify EventKit APIs then because this code has not been built or tested in Transcriber. |
+| `NotificationManager.swift` | Adapt when meeting integration starts | The actionable meeting-end notification and foreground presentation pattern fit Stage 6. Notification permission and signing behavior still need a local app check. |
+| `RecordingsLibrary.swift` and folder-name sanitizing | Reuse as design input | Collision avoidance and tolerant directory discovery are useful. Transcriber's manifest and later SQLite store remain the source of truth, so folder-name parsing must not become identity. |
+| `Keychain.swift` | Adapt behind a provider-neutral credential store | It demonstrates the small Security-framework surface needed by Stage 2 or 3. Preserve explicit errors and use Transcriber's stable signing identity; do not copy its delete-then-add error suppression. |
+| `GeminiTranscriber.swift` | Adapt as the Stage 2 cloud flow | The user approved the credential, resumable upload, processing poll, transcription and local-result flow. Keep it behind the provider-neutral `Transcriber` protocol. The provider and model remain separate choices; their API details are time-sensitive, and network construction must remain impossible until a key is present. |
+| `RecorderPanel.swift`, preferences and meeting list | Reuse interaction patterns in Stage 6 | The compact menu-bar controls, recording library and nearby-meeting affordances fit the product. Adapt them to Transcriber's state machine and English UI rather than importing its model wholesale. |
+| `FloatRingBuffer.swift` | Compare, do not replace | It confirms the same SPSC shape already used here, but Transcriber's ring buffer, pointer lifetime rules, drop accounting and sanitizer gate are stricter and already tested. |
+| `SystemAudioTap.swift` | Use as an adversarial reference only | Tap creation, aggregate teardown and the zero-buffer rebuild path are relevant comparisons. The callback constructs objects, takes locks and calls closures; its rebuild appends across a possible format change and neither records a gap nor re-verifies signal. Those choices violate Transcriber's real-time and timeline invariants. |
+| `MicCapture.swift` | Do not copy into the capture path | It allocates/downmixes, locks and writes an `AVAudioFile` in the audio callback. Transcriber permits only a copy into its preallocated ring buffer there and requires Voice Processing IO when verified system capture makes echo cancellation safe. |
+| `StereoMixer.swift` | Do not reuse | It resamples and combines the two sources into stereo AAC. Transcriber keeps separate native-rate Int16 WAV masters and derives 16 kHz mono files with `afconvert` after recording. |
+| Silence auto-stop and pause behavior | Product input, not an implementation default | Upstream drops samples while paused and can stop after two-channel silence. Neither behavior is in the current stage; both need an explicit product decision and a timeline representation before implementation. |
+
+## Stage-specific use
+
+### Completed Stage 1 reference
+
+The useful upstream lesson is that a process tap may keep delivering callbacks containing
+silence and that rebuilding both the tap and aggregate is a plausible recovery action. It
+does not replace Transcriber's completed recovery contract: a restart here keeps the
+unaffected path running, makes the missing wall-clock interval explicit, inserts native-rate
+silence, verifies the rebuilt system path with an active signal and preserves the degraded
+fallback if verification fails. Use the upstream implementation as a comparison if capture
+recovery is revisited, not as a simpler replacement for that contract.
+
+Do not import the upstream watchdog threshold. Its silence decision depends on output-device
+activity and a fixed amplitude/time rule that has not been reproduced on this app's hardware.
+It is a comparison case for D13, not evidence that D13 is resolved.
+
+### Stage 2
+
+The upstream cloud flow is approved for adaptation: an explicitly supplied credential lives
+in Keychain; the app uploads a finished recording resumably; it waits for provider-side
+processing; starts transcription; reports progress and errors; and stores the returned
+transcript locally. Keep the implementation behind the `Transcriber` protocol and construct
+no network request until a credential exists.
+
+Provider and model selection remain independent decisions. Retain the local/cloud source
+distinction in the UI and evaluate Russian and English quality with the ASR fixtures. Do not
+inherit a preview model name or request shape without checking current first-party API
+documentation.
+
+### Stages 3 and 6
+
+The highest-value reuse is outside the audio callback: Keychain storage, a recordings library,
+EventKit meeting context, actionable notifications, preferences and the menu-bar interaction
+model. These components are small and isolated enough to adapt one at a time while keeping
+Transcriber's manifest, privacy rules and later SQLite store authoritative.
+
+## Known limits of the upstream evidence
+
+- `swift build` passed for the reviewed commit on this machine, but the repository has no
+  automated tests and no hardware run was performed. Its code can shorten implementation and
+  research, but cannot be imported as verification.
+- Its research notes contain competing recommendations about independent captures versus one
+  aggregate containing the microphone. The shipped code uses independent captures, which also
+  matches Transcriber's separate-path failure policy.
+- Its raw format, post-processing, echo policy, signing and cloud provider are product choices
+  for a different application. They are not simplifications available to Transcriber without
+  changing requirements.
+- Its mid-file sample-rate handling, real-time callbacks and silent-tap detector are useful
+  review targets precisely because they expose failure modes our stricter invariants must rule
+  out.
