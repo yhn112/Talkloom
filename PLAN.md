@@ -98,7 +98,9 @@ after recording. The stages below say what each one is, not where the work stand
 
 ### Stage 2 — offline transcription (MVP)
 - Silero VAD ahead of ASR. This is mandatory, not cosmetic: on silence Whisper emits
-  confident hallucinations lifted from training subtitles.
+  confident hallucinations lifted from training subtitles, and the OpenRouter baseline
+  reproduced the same behaviour. macOS supplies no voice-activity detector that can run in
+  front of another engine — see [`docs/speech-framework.md`](docs/speech-framework.md).
 - Derive the 16 kHz mono tracks from the masters with `afconvert` before transcribing.
 - Transcribe both tracks after the meeting; merge by timestamp, labelling mic segments
   "me" and system segments "them".
@@ -110,7 +112,8 @@ after recording. The stages below say what each one is, not where the work stand
   provider data collection and require a zero-data-retention route.
 - A local implementation follows, using whisper.cpp with Metal or WhisperKit and a
   `large-v3`-class model, which is what Russian needs — small models degrade far more on
-  Russian than on English.
+  Russian than on English. Apple's own `DictationTranscriber` is a third candidate, and the
+  only one with no model to ship; it costs a macOS 26 deployment floor and is unmeasured.
 - ✅ Done when: recording a call in the app produces a persisted, timestamp-aligned transcript
   with speaker labels without manual shell steps, measured on real Russian and English
   speech; a forced malformed provider response proves that retries are bounded and other

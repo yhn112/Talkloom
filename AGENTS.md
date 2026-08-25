@@ -25,6 +25,8 @@ the same change.
   starting cleanup work, and add to it when leaving something unfinished.
 - `docs/system-audio-capture.md` — process taps and aggregate devices, every claim cited to
   an SDK header and line. Read before touching the system-audio path.
+- `docs/speech-framework.md` — what macOS 26's `Speech` module can and cannot do for this
+  project. Read before choosing a VAD or building the local ASR engine.
 - `.agents/skills/*/SKILL.md` — how to build, record, diagnose a recording, measure ASR.
   Read the one that matches the task at hand.
 - `.agents/roles/*.md` — what each delegated subagent is responsible for.
