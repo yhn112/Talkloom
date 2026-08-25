@@ -62,6 +62,11 @@ using both denied data collection and a
 transcript stays local. The direct Google Files API upload and processing poll from upstream
 are not part of this transport.
 
+Recorder's local credential fallback is reused only by the non-shipping ASR evaluation
+runner. Transcriber.app does not inherit that fallback; its eventual durable credential
+remains Keychain-only. The evaluation boundary and current VAD decision are recorded in
+[`docs/asr-evaluation.md`](asr-evaluation.md).
+
 Keep the implementation behind the `Transcriber` protocol, retain the local/cloud source
 distinction in the UI, and evaluate Russian and English quality with the ASR fixtures. The
 exact Gemini model remains configurable and must be measured rather than inherited from an

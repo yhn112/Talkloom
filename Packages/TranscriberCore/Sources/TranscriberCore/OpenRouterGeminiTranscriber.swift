@@ -70,6 +70,7 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         case unsupportedAudioFormat
         case emptyAudioFile
         case audioFileTooLarge(actualBytes: Int, maximumBytes: Int)
+        case invalidChunkOffset
         case invalidChunkDuration
         case audioReadFailed(String)
         case requestEncodingFailed
@@ -77,7 +78,16 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         case invalidHTTPResponse
         case httpFailure(statusCode: Int, message: String)
         case invalidResponse
-        case invalidSegment
+        case invalidSegment(index: Int, failure: SegmentFailure)
+
+        public enum SegmentFailure: Equatable, Sendable {
+            case nonFiniteTimestamp
+            case negativeTimestamp
+            case endBeforeStart
+            case unorderedStart
+            case endBeyondChunk(end: TimeInterval, duration: TimeInterval)
+            case emptyText
+        }
 
         public var errorDescription: String? {
             switch self {
@@ -89,6 +99,8 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                 "The transcription input is empty."
             case .audioFileTooLarge(let actualBytes, let maximumBytes):
                 "The transcription input is \(actualBytes) bytes; the configured maximum is \(maximumBytes)."
+            case .invalidChunkOffset:
+                "The transcription chunk offset must be finite and nonnegative."
             case .invalidChunkDuration:
                 "The transcription chunk duration must be finite and greater than zero."
             case .audioReadFailed(let message):
@@ -103,8 +115,8 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                 "OpenRouter returned HTTP \(statusCode): \(message)"
             case .invalidResponse:
                 "OpenRouter returned an invalid transcription response."
-            case .invalidSegment:
-                "OpenRouter returned an invalid transcript segment."
+            case .invalidSegment(let index, let failure):
+                "OpenRouter returned invalid transcript segment \(index): \(failure.description)."
             }
         }
     }
@@ -135,7 +147,7 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
             throw TranscriptionError.unsupportedAudioFormat
         }
         guard chunk.startOffset.isFinite, chunk.startOffset >= 0 else {
-            throw TranscriptionError.invalidSegment
+            throw TranscriptionError.invalidChunkOffset
         }
         guard chunk.duration.isFinite, chunk.duration > 0 else {
             throw TranscriptionError.invalidChunkDuration
@@ -285,14 +297,26 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         }
 
         var previousStart: TimeInterval = 0
-        let segments = try payload.segments.map { segment in
+        let segments = try payload.segments.enumerated().map { index, segment in
             let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard segment.start.isFinite, segment.end.isFinite,
-                segment.start >= 0, segment.end >= segment.start,
-                segment.start >= previousStart, segment.end <= chunk.duration,
-                !text.isEmpty
-            else {
-                throw TranscriptionError.invalidSegment
+            let failure: TranscriptionError.SegmentFailure?
+            if !segment.start.isFinite || !segment.end.isFinite {
+                failure = .nonFiniteTimestamp
+            } else if segment.start < 0 || segment.end < 0 {
+                failure = .negativeTimestamp
+            } else if segment.end < segment.start {
+                failure = .endBeforeStart
+            } else if segment.start < previousStart {
+                failure = .unorderedStart
+            } else if segment.end > chunk.duration {
+                failure = .endBeyondChunk(end: segment.end, duration: chunk.duration)
+            } else if text.isEmpty {
+                failure = .emptyText
+            } else {
+                failure = nil
+            }
+            if let failure {
+                throw TranscriptionError.invalidSegment(index: index, failure: failure)
             }
             previousStart = segment.start
             return TranscriptSegment(
@@ -371,6 +395,25 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         }
 
         let segments: [Segment]
+    }
+}
+
+private extension OpenRouterGeminiTranscriber.TranscriptionError.SegmentFailure {
+    var description: String {
+        switch self {
+        case .nonFiniteTimestamp:
+            "a timestamp is not finite"
+        case .negativeTimestamp:
+            "a timestamp is negative"
+        case .endBeforeStart:
+            "the end precedes the start"
+        case .unorderedStart:
+            "the start precedes the prior segment"
+        case .endBeyondChunk(let end, let duration):
+            "end \(end) exceeds chunk duration \(duration)"
+        case .emptyText:
+            "the text is empty"
+        }
     }
 }
 

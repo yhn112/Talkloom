@@ -1,0 +1,1 @@
+Обсудим API gateway and retry policy завтра.

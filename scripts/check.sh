@@ -40,11 +40,23 @@ else
     exit 1
 fi
 
-# 3. The Python tooling. Only that each script still starts: they are argparse front ends
-# over numpy, soundfile and jiwer, so an edit that breaks an import or a signature fails
-# here rather than when someone reaches for the tool mid-diagnosis. .venv is a derived
-# local artifact, so a missing one is skipped rather than failed — `uv sync` creates it.
+# 3. The evaluation tooling. Python front ends must still import and parse their arguments;
+# shell entry points must still parse. An edit then fails here rather than when someone
+# reaches for the tool mid-diagnosis. .venv is a derived local artifact, so a missing one is
+# skipped rather than failed — `uv sync` creates it.
 step tools
+if ! shell_problems=$(
+    bash -n scripts/generate-asr-smoke-fixtures.sh scripts/openrouter-asr-eval.sh 2>&1
+); then
+    fail
+    echo "$shell_problems" | sed 's/^/  /'
+    exit 1
+fi
+if ! git check-ignore -q .openrouter.apikey; then
+    fail
+    echo "  .openrouter.apikey must stay ignored by git"
+    exit 1
+fi
 if [ -x .venv/bin/python ]; then
     broken=""
     for script in wer audio_check track_compare; do
@@ -88,7 +100,10 @@ fi
 # run first and in about a second: a broken WAV header should not cost a full app build to
 # discover.
 step package
-if summary=$(swift test --package-path Packages/TranscriberCore 2>&1 | xcsift -f toon -w -E); then
+if summary=$(swift test --package-path Packages/TranscriberCore 2>&1 | xcsift -f toon -w -E) \
+    && swift build --package-path Packages/TranscriberCore --product OpenRouterASREval >/dev/null \
+    && probe_directory=$(swift build --package-path Packages/TranscriberCore --show-bin-path) \
+    && "$probe_directory/OpenRouterASREval" --help >/dev/null; then
     ok "$(echo "$summary" | awk '/passed_tests:/ {print $2" tests"}')"
 else
     fail

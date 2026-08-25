@@ -308,6 +308,10 @@ Recordings, transcripts, and summaries stay on the machine. Sending audio or tex
 external API happens only when the user explicitly enables it, and the UI must show that
 it is on. Do not add telemetry, analytics, or "anonymous crash reporting".
 
+The one pre-UI testing exception for credentials is the non-shipping ASR evaluator: it may
+read `.openrouter.apikey` from the repository root only after confirming that Git ignores
+the file. Transcriber.app never reads that file, and no credential may be staged or committed.
+
 ### Never commit
 
 `Transcriber.xcodeproj` (generated), models (`*.bin`, `*.mlmodelc`, `*.gguf`),

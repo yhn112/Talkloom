@@ -1,0 +1,1 @@
+Let us agree on the audio capture architecture before the next sprint.

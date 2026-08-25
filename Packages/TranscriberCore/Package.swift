@@ -19,11 +19,19 @@ let package = Package(
     name: "TranscriberCore",
     platforms: [.macOS(.v15)],
     products: [
-        .library(name: "TranscriberCore", targets: ["TranscriberCore"])
+        .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
+        // A non-shipping integration probe. It is the narrow path for measuring the live
+        // provider before credential UI and the finished-session pipeline exist.
+        .executable(name: "OpenRouterASREval", targets: ["OpenRouterASREval"]),
     ],
     targets: [
         .target(
             name: "TranscriberCore",
+            swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
+        ),
+        .executableTarget(
+            name: "OpenRouterASREval",
+            dependencies: ["TranscriberCore"],
             swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
         ),
         .testTarget(

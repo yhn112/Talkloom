@@ -35,8 +35,9 @@ Packages/*/.swiftpm/
 /Transcripts/
 
 # Evaluation fixtures and reports
-/tests/fixtures/audio/
-/tests/reports/
+/Tests/fixtures/audio/
+/Tests/reports/*
+!/Tests/reports/baseline.md
 
 # Secrets
 .env

@@ -4,11 +4,22 @@ import TranscriberCore
 
 @Suite("OpenRouter Gemini transcriber")
 struct OpenRouterGeminiTranscriberTests {
-    enum InvalidSegmentsCase: CaseIterable, Sendable {
+    enum InvalidSegmentsCase: CaseIterable, Equatable, Sendable {
         case endBeforeStart
         case unordered
         case emptyText
         case timestampBeyondChunk
+
+        var expectedFailure: OpenRouterGeminiTranscriber.TranscriptionError.SegmentFailure {
+            switch self {
+            case .endBeforeStart: .endBeforeStart
+            case .unordered: .unorderedStart
+            case .emptyText: .emptyText
+            case .timestampBeyondChunk: .endBeyondChunk(end: 10.01, duration: 10)
+            }
+        }
+
+        var expectedIndex: Int { self == .unordered ? 1 : 0 }
 
         var segments: [[String: Any]] {
             switch self {
@@ -283,7 +294,11 @@ struct OpenRouterGeminiTranscriberTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let (client, _) = try client(response: response(segments: testCase.segments))
 
-        await #expect(throws: OpenRouterGeminiTranscriber.TranscriptionError.invalidSegment) {
+        await #expect(
+            throws: OpenRouterGeminiTranscriber.TranscriptionError.invalidSegment(
+                index: testCase.expectedIndex,
+                failure: testCase.expectedFailure)
+        ) {
             try await client.transcribe(
                 TranscriptionChunk(
                     audioURL: url,
