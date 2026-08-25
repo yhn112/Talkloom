@@ -85,6 +85,11 @@ final class SystemAudioProducer: SegmentProducer {
     /// here can tell "still there" from "already gone". A ledger that retried forever would
     /// replace the leak it prevents with one of its own. D24 records the experiment that
     /// would settle it.
+    ///
+    /// An attempt is one retirement, not one call. Sweeping opportunistically as well would
+    /// spend the whole budget inside a single restart, back to back, giving CoreAudio no
+    /// interval in which to change its mind — and a transient refusal is the only kind a retry
+    /// could ever have helped with.
     private static let releaseAttemptLimit = 3
 
     /// The IO block is dispatched onto this queue. The header is explicit that IO blocks
@@ -98,8 +103,9 @@ final class SystemAudioProducer: SegmentProducer {
     /// An aggregate device that is never destroyed outlives the process that made it: it
     /// becomes litter in the user's audio system, visible to every other app, and nothing
     /// cleans it up. Logging a failed teardown and dropping the handle guarantees that
-    /// outcome, so a handle stays here — retried on the next teardown, and finally in
-    /// `deinit` — until CoreAudio accepts it.
+    /// outcome, so a handle stays here and is retried at each later retirement, and once more
+    /// in `deinit` — up to `releaseAttemptLimit`, after which it is abandoned deliberately and
+    /// loudly rather than kept forever.
     private var outstanding: [Generation] = []
     private var watchdogTask: Task<Void, Never>?
 
@@ -131,8 +137,6 @@ final class SystemAudioProducer: SegmentProducer {
     func content(for options: SystemAudioOptions) -> TrackContent { .remote }
 
     func acquire(_ options: SystemAudioOptions) throws -> (Generation, SegmentFormat) {
-        sweepRetired(context: "before acquiring a system audio tap")
-
         let generation = try createTap()
         let format = SegmentFormat(
             sampleRate: generation.format.mSampleRate,

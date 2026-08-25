@@ -58,7 +58,6 @@ final class MicrophoneProducer: SegmentProducer {
         let engine: AVAudioEngine
         let format: AVAudioFormat
         let voiceProcessing: Bool
-        var isRunning = true
 
         init(engine: AVAudioEngine, format: AVAudioFormat, voiceProcessing: Bool) {
             self.engine = engine
@@ -122,12 +121,14 @@ final class MicrophoneProducer: SegmentProducer {
     /// Processing IO while everything around it is being torn down is the neighbourhood of the
     /// reproducible `AVAudioIOUnit::IOUnitPropertyListener` crash `acquire` documents. The
     /// resource that must not outlive the process is the aggregate device, and that belongs to
-    /// CoreAudio; an engine dies with the process either way. So this reports and stops there.
+    /// CoreAudio. The engines are deallocated together with this producer whichever way it goes
+    /// — in the app it is process-lifetime, and in a device test the `MicrophoneEngineSet` goes
+    /// with it — so stopping them first buys nothing and only adds calls next to a known crash.
     deinit {
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
         }
-        if outstanding.contains(where: \.isRunning) {
+        if !outstanding.isEmpty {
             AppLog.capture.error(
                 "the microphone was dropped without being stopped; its engine is left to the process"
             )
@@ -240,7 +241,6 @@ final class MicrophoneProducer: SegmentProducer {
     private static func quiet(_ generation: Generation) {
         generation.engine.inputNode.removeTap(onBus: 0)
         generation.engine.stop()
-        generation.isRunning = false
     }
 
     /// Plugging in headphones changes the default device and stops the engine underneath us.
