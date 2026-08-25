@@ -19,6 +19,12 @@ Audio and reference-text pairs live in `tests/fixtures/` as `<name>.wav` next to
   hallucinations;
 - where possible, a real meeting excerpt with background noise and interruptions.
 
+A fixture needs a reference transcript, and one no longer has to be written by hand:
+`scripts/generate-asr-reference.sh` writes one beside a WAV using the cloud engine, with a
+sidecar naming the model and the audio's checksum. `docs/asr-evaluation.md` states when that is
+legitimate and the three things such a reference may not be used for — read it before scoring
+anything against a generated reference.
+
 Synthetic speech is available for a quick smoke test:
 
 ```bash

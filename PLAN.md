@@ -110,6 +110,10 @@ after recording. The stages below say what each one is, not where the work stand
   Gemini through OpenRouter. The OpenRouter credential is the explicit cloud opt-in and
   lives in Keychain; without it the app constructs no request. Enabled cloud requests deny
   provider data collection and require a zero-data-retention route.
+- **The cloud engine sets the quality bar.** Measured on real Russian technical speech it is
+  accurate enough to be treated as correct, so a local engine is adopted for cost, offline
+  operation and privacy — never on a claim of being better. A local option that is also slower
+  or worse on terms is still worth having for those three reasons, and is not an upgrade.
 - A local implementation follows, using whisper.cpp with Metal or WhisperKit and a
   `large-v3`-class model, which is what Russian needs — small models degrade far more on
   Russian than on English. Apple's on-device engine was evaluated for this role and rejected;
