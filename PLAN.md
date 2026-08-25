@@ -112,8 +112,8 @@ after recording. The stages below say what each one is, not where the work stand
   provider data collection and require a zero-data-retention route.
 - A local implementation follows, using whisper.cpp with Metal or WhisperKit and a
   `large-v3`-class model, which is what Russian needs — small models degrade far more on
-  Russian than on English. Apple's own `DictationTranscriber` is a third candidate, and the
-  only one with no model to ship; it costs a macOS 26 deployment floor and is unmeasured.
+  Russian than on English. Apple's on-device engine was evaluated for this role and rejected;
+  [`docs/speech-framework.md`](docs/speech-framework.md) records why, so it is not revisited.
 - ✅ Done when: recording a call in the app produces a persisted, timestamp-aligned transcript
   with speaker labels without manual shell steps, measured on real Russian and English
   speech; a forced malformed provider response proves that retries are bounded and other

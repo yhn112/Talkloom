@@ -60,35 +60,25 @@ evidence — recorded as such, naming who did it, so a later reader knows the ba
 rather than a paper. `Tests/reports/baseline.md` records which corpora were checked, what was
 found, and which known defects survive in the ones being used.
 
-## A tiered engine is a candidate, not a decision
+## The tiered engine, and why it is closed
 
-The measured engines fail in different places: the cloud one invents speech on silence and
-guesses its own timestamps, the on-device one is exact and silent on silence but takes a single
-locale per run and damages whatever language it was not given. That asymmetry makes a tiered
-arrangement worth evaluating — transcribe locally, then spend a cloud request only where the
-local result is weak.
+A tiered arrangement was worth evaluating: transcribe locally, spend a cloud request only where
+the local result is weak. Two measured properties would have made it buildable — the on-device
+engine reported word-level time ranges, so a weak stretch could be named in seconds and cut out
+of the derived track exactly, and because the escalated chunk's position comes from our own
+boundaries the cloud engine would have been asked only for text, the one thing it does
+reliably.
 
-Two things measured in [`Tests/reports/baseline.md`](../Tests/reports/baseline.md) are what
-would make it buildable. The on-device engine reports **per-word** time ranges and confidences,
-so a weak stretch can be named in seconds and cut out of the derived track exactly. And because
-the escalated chunk's position on the timeline is then known from our own boundaries, the cloud
-engine would be asked only for text — the one thing it does reliably.
+It is closed because the local tier is. Apple's engine was the only on-device candidate that
+needed no model file, and it is not used at all — see
+[`speech-framework.md`](speech-framework.md). What killed the tiering separately is that its
+confidence could not find its own errors: the most confident word in one utterance was wrong
+and a correct word scored a third of it. A first pass that cannot mark its weak spots cannot
+route them anywhere.
 
-The `ru_terms` measurement then made the case for tiering much stronger and the detector much
-weaker at once. The two engines are not close where it counts — 83.33% against 0.00% WER on
-Russian speech carrying English technical vocabulary — so there is a great deal to gain. But
-per-word confidence does not find those errors: the most confident wrong word in that utterance
-scored 0.914 while a correct word scored 0.275. Escalating on it would skip most of what needs
-escalating.
-
-What is therefore unresolved: which local signal actually marks a hard span. Mean confidence
-over a span separates a term-dense utterance from a clean one only 0.580 to 0.812, and
-divergence among the engine's own `alternatives` lined up with the damaged regions but has not
-been measured. Contextual strings are not a substitute — they change recognition, but which
-terms are in the list determines whether any of them applies, and Latin-script terms inside
-Russian audio are not reached at all.
-
-None of it has been seen on real speech rather than on synthesized sentences.
+Nothing here rules out tiering over a different local engine. It would need the same two
+things: timing precise enough to cut on, and a signal that predicts error well enough to route
+on. The second is the hard one, and the measurement to run first.
 
 ## Product-pipeline boundary
 

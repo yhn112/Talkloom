@@ -28,11 +28,6 @@ if [ ${#fixtures[@]} -eq 0 ]; then
     fixtures=(ru_short en_short mixed_short ru_terms long_pause silence)
 fi
 
-# Extra arguments for the evaluator, word-split deliberately. An engine that has to be told
-# the language up front — Apple's does, the cloud one detects it — needs one run per language,
-# and that difference belongs to the engine rather than to this loop.
-read -r -a engine_arguments <<<"${TRANSCRIBER_ASR_ENGINE_ARGS:-}"
-
 run_id=${TRANSCRIBER_ASR_RUN_ID:-"$product-$(date -u +%Y%m%dT%H%M%SZ)"}
 report_directory="Tests/reports/$run_id"
 
@@ -60,7 +55,7 @@ for fixture in "${fixtures[@]}"; do
     fi
 
     echo "evaluating $fixture"
-    if ! /usr/bin/time -l "$binary" "$audio" "${engine_arguments[@]}" >"$report" 2>"$runtime"; then
+    if ! /usr/bin/time -l "$binary" "$audio" >"$report" 2>"$runtime"; then
         failed_runtime="$report_directory/$fixture.failed.txt"
         mv "$runtime" "$failed_runtime"
         rm -f "$report"
