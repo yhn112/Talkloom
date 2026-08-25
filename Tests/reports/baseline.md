@@ -217,6 +217,65 @@ took effect under `ru_RU` at all — neither spelled in Latin nor transliterated
 exists but does not behave like a glossary: which terms are in the list changes whether any of
 them applies, and Latin-script terms inside Russian audio are not reached.
 
+## First measurement on real speech
+
+Six clips of 8 to 27 seconds from the `test` split of `bond005/podlodka_speech` — a Russian
+IT podcast, so spontaneous speech carrying the English vocabulary these meetings use. Audio
+converted to the canonical format with the same `afconvert` settings the app uses. Nothing was
+copied into this repository; the rows are identified by dataset, split and index.
+
+| Clip | Duration | `DictationTranscriber` `ru_RU` | `gemini-3.7-flash` |
+|---|---:|---:|---:|
+| test/0 | 8.1 s | 23.08% | 0.00% |
+| test/1 | 11.9 s | 24.00% | 0.00% |
+| test/2 | 17.2 s | 30.77% | 5.77% |
+| test/3 | 16.5 s | 26.53% | 8.16% |
+| test/4 | 27.5 s | 13.24% | 1.47% |
+| test/5 | 16.2 s | 6.67% | 2.22% |
+| **mean** | | **20.72%** | **2.94%** |
+
+The synthetic `ru_terms` result survives contact with real speech, at a smaller magnitude: the
+on-device engine is roughly seven times worse here, and its errors are again the terms. On
+test/2 it produced *ставший тем льдом*, *сделали этим Лином*, *one one one 3 60 Performance*
+and *очень легко нащи этого всего* where the reference has *тимлидом*, *one-on-one*,
+*performance review* and *натащить*. The cloud transcript of the same clip is correct
+throughout, including the terms.
+
+Two cautions on these numbers. The dataset's transcripts have no documented provenance, and on
+test/2 the cloud engine reported `360` between `one-on-one` and `performance review` where the
+reference has nothing — plausibly the reference being incomplete rather than the engine
+inventing, which would mean the cloud column is pessimistic. And a podcast is recorded in a
+studio: no crosstalk, no bad microphone, no interruptions. This is real speech, not yet a real
+meeting.
+
+### The provider failure that a retry does fix
+
+Clip test/1 was rejected on the first request with `invalidResponse` — a malformed structured
+response, not a timestamp overshoot. Repeated: two of the next three attempts succeeded at
+0.00% WER, the third was rejected the same way. So this failure is genuinely transient at
+roughly the rate a bounded retry is built for, unlike the systematic overshoot that
+`ru_terms`-era diagnosis removed. It is the first evidence for the retry layer from real audio.
+
+## Real-speech corpora worth using
+
+Checked for availability, gating and licence rather than recalled.
+
+| Corpus | What it is | Licence | Access |
+|---|---|---|---|
+| `bond005/podlodka_speech` | Russian IT podcast, spontaneous, English terms throughout; 107 clips, 188 MB | none stated | ungated |
+| `bond005/sova_rudevices` | Russian live speech, manually annotated, 100 h at 16 kHz | CC BY 4.0 | ungated |
+| AMI Meeting Corpus | English four-person meetings, 100 h, headset and distant-microphone channels | CC BY 4.0 | direct download, per meeting |
+| `distil-whisper/earnings22` | Real accented English earnings calls, entity-dense, 119 h | — | ungated |
+| `Shelton1013/SwitchLingua_audio` | Real recorded code-switching including Russian-English, 80 h | CC BY-NC-SA 4.0 | gated, account required |
+
+AMI matters beyond being real: it carries close-talking headset audio and distant-microphone
+audio of the same meeting, which is the closest public analogue of this project's two tracks.
+
+No public corpus was found of Russian meetings carrying English technical vocabulary — the
+exact material this app is for. `podlodka_speech` is the nearest, and SwitchLingua is the only
+Russian-English code-switching audio at all. That gap is why a recording made here still has to
+happen.
+
 ## Real recording pipeline probe
 
 A same-day manual probe started with a recording made by Transcriber.app while real Russian
