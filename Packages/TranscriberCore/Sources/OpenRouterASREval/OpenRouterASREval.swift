@@ -17,7 +17,7 @@ struct OpenRouterASREval {
         var errorDescription: String? {
             switch self {
             case .usage:
-                "Usage: OpenRouterASREval [--validate-only] AUDIO.wav [microphone|systemAudio]"
+                "Usage: OpenRouterASREval [--validate-only] [--raw] AUDIO.wav [microphone|systemAudio]"
             case .missingCredential:
                 "Neither OPENROUTER_API_KEY nor .openrouter.apikey is available."
             case .invalidCredential:
@@ -50,6 +50,8 @@ struct OpenRouterASREval {
         }
         let validateOnly = arguments.first == "--validate-only"
         if validateOnly { arguments.removeFirst() }
+        let echoRawResponse = arguments.first == "--raw"
+        if echoRawResponse { arguments.removeFirst() }
         guard arguments.count == 1 || arguments.count == 2 else { throw Failure.usage }
 
         let audioURL = URL(fileURLWithPath: arguments[0]).standardizedFileURL
@@ -70,7 +72,10 @@ struct OpenRouterASREval {
 
         let transcriber = OpenRouterGeminiTranscriber(
             apiKey: apiKey,
-            maximumAudioBytes: byteLimit)
+            maximumAudioBytes: byteLimit,
+            transport: echoRawResponse
+                ? EchoingTransport(wrapped: URLSessionHTTPTransport())
+                : URLSessionHTTPTransport())
         let clock = ContinuousClock()
         let start = clock.now
         let result = try await transcriber.transcribe(
@@ -166,5 +171,21 @@ struct OpenRouterASREval {
         }
         process.waitUntilExit()
         return process.terminationStatus == 0
+    }
+}
+
+/// Writes the provider's reply to stderr on its way through, so a response that strict
+/// validation is about to reject can still be read. It exists because the interesting
+/// question about a rejected response is what the text was, and the client — correctly —
+/// keeps no rejected payload.
+private struct EchoingTransport: HTTPTransport {
+    let wrapped: any HTTPTransport
+
+    func data(for request: URLRequest) async throws -> HTTPTransportResponse {
+        let response = try await wrapped.data(for: request)
+        FileHandle.standardError.write(Data("--- provider response ---\n".utf8))
+        FileHandle.standardError.write(response.data)
+        FileHandle.standardError.write(Data("\n--- end ---\n".utf8))
+        return response
     }
 }

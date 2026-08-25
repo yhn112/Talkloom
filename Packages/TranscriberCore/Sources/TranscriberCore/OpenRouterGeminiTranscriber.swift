@@ -185,7 +185,7 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                 maximumBytes: maximumAudioBytes.value)
         }
 
-        let body = try requestBody(audio: audio)
+        let body = try requestBody(audio: audio, duration: chunk.duration)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
@@ -213,7 +213,7 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         return try decode(response.data, for: chunk)
     }
 
-    private func requestBody(audio: Data) throws -> Data {
+    private func requestBody(audio: Data, duration: TimeInterval) throws -> Data {
         let schema: [String: Any] = [
             "type": "object",
             "properties": [
@@ -250,7 +250,7 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                 [
                     "role": "user",
                     "content": [
-                        ["type": "text", "text": Self.prompt],
+                        ["type": "text", "text": Self.prompt(duration: duration)],
                         [
                             "type": "input_audio",
                             "input_audio": [
@@ -341,9 +341,15 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         )
     }
 
-    private static let prompt = """
-        Transcribe every spoken word in this audio chunk. Preserve the spoken language and do not translate Russian or English. Return timestamps in seconds relative to the beginning of this chunk. Remove no meaningful words, invent nothing, and return an empty segments array for silence or non-speech noise.
+    /// The chunk's exact length is stated because the model does not measure it: it is handed
+    /// tokenized audio and guesses where the recording ends, overshooting past it often enough
+    /// that segment validation rejected whole correct transcripts. The anchor is what keeps the
+    /// returned timestamps inside the audio they describe. Measured in `Tests/reports/baseline.md`.
+    private static func prompt(duration: TimeInterval) -> String {
         """
+        Transcribe every spoken word in this audio chunk. Preserve the spoken language and do not translate Russian or English. This chunk is exactly \(String(format: "%.3f", duration)) seconds long; return timestamps in seconds relative to its beginning, and let no timestamp exceed its length. Remove no meaningful words, invent nothing, and return an empty segments array for silence or non-speech noise.
+        """
+    }
 
     private static func providerMessage(_ message: String) -> String {
         let singleLine = message.replacingOccurrences(of: "\n", with: " ")

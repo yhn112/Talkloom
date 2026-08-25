@@ -142,6 +142,32 @@ struct OpenRouterGeminiTranscriberTests {
         #expect(responseFormat["type"] as? String == "json_schema")
     }
 
+    @Test(
+        "the prompt states the chunk's exact length",
+        arguments: [(10.0, "10.000"), (3.8124375, "3.812"), (67.4, "67.400")])
+    func promptStatesDuration(duration: TimeInterval, expected: String) async throws {
+        let url = try audioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (client, transport) = try client(response: response())
+
+        _ = try await client.transcribe(
+            TranscriptionChunk(
+                audioURL: url,
+                startOffset: 0,
+                duration: duration,
+                source: .microphone))
+
+        // The model does not measure the audio; without this anchor it guesses the end and
+        // overshoots, and the overshoot is what the segment validation then rejects.
+        let body = try #require(try await transport.onlyRequest().httpBody)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(object["messages"] as? [[String: Any]])
+        let content = try #require(messages.first?["content"] as? [[String: Any]])
+        let text = try #require(
+            content.first(where: { $0["type"] as? String == "text" })?["text"] as? String)
+        #expect(text.contains("\(expected) seconds long"))
+    }
+
     @Test("response timestamps map to the meeting timeline")
     func responseMapping() async throws {
         let url = try audioFile()

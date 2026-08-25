@@ -85,12 +85,47 @@ than on a recollection of the audio above.
 rejected the same way, with a different overshoot each time — `en_short` ended at 4.64 s,
 4.54 s and 4.54 s against its 3.812 s of audio, and `mixed_short` at 4.12 s against 3.476 s.
 
-**This falsifies the transience premise recorded for D22.** The earlier real-recording probe
-saw an identical retry succeed once; on these fixtures the same failure is reproducible across
-four consecutive attempts, so a bounded retry would exhaust its budget and still lose the
-chunk. The provider's absolute end timestamps are simply unreliable — they overshot by 9% to
-22% here and by 57% on the 67.4 s real-recording chunk — and the client currently discards a
-correct transcript because of them.
+Reading one rejected response settled what was actually wrong: the text was exact — `Let us
+agree on the audio capture architecture before the next sprint.` — and `start` was 0.0. Only
+`end` was outside the file. The client was discarding a perfect transcript over one number.
+
+### Why the timestamps overshoot
+
+Three hypotheses, one variable each, three identical requests per variant, on `en_short`
+(3.812 s of audio).
+
+| Variant | Ends returned | Verdict |
+|---|---|---|
+| Control, current prompt | 4.25 (+11%), 4.80 (+26%), 3.84 (+1%) | 2 of 3 rejected |
+| `reasoning: {effort: minimal}` | 4.14 (+9%), reasoning tokens 0 | Rejected; not the cause |
+| Prompt states the exact duration | 3.76 (−1%), 3.76 (−1%), 3.56 (−7%) | All inside the audio |
+
+`reasoning: {effort: none}` is refused by the provider — *"Reasoning is mandatory for this
+endpoint and cannot be disabled"* — so the upstream reference's `thinkingBudget = 0` is not
+reachable here. It would not have helped: with reasoning tokens at zero the overshoot stayed.
+
+The cause is that **the model is never told how long the audio is.** It receives tokenized,
+downsampled audio — 96 audio tokens for these 3.812 s — and estimates the endpoint. Stating
+the duration in the prompt anchors it. Across all five fixtures, three requests each, fifteen
+of fifteen ends landed inside the audio.
+
+### After the fix
+
+| Fixture | WER | CER | Substitutions | xRT | Provider cost |
+|---|---:|---:|---:|---:|---:|
+| `ru_short` | 0.00% | 0.00% | 0 | 0.786 | $0.000541 |
+| `en_short` | 0.00% | 0.00% | 0 | 0.877 | $0.000490 |
+| `mixed_short` | 14.29% | 6.98% | 1 | 1.625 | $0.000634 |
+| `long_pause` | 0.00% | 0.00% | 0 | 0.479 | $0.000679 |
+| `silence` | — | — | — | 0.876 | $0.000921 |
+
+Nothing was rejected. `mixed_short` returned to the 14.29% of the original baseline, so the
+anchor costs no accuracy.
+
+One thing got worse, and it matters. Silence hallucinated in all three anchored probe requests
+and again in this run, and those hallucinations now carry **valid** timestamps. The
+out-of-duration check had been rejecting some of them by accident; it was never a defence
+against invented speech and must not be counted as one. Only VAD is.
 
 ## Real recording pipeline probe
 
