@@ -398,6 +398,30 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
     }
 }
 
+extension OpenRouterGeminiTranscriber.TranscriptionError: ClassifiedTranscriptionError {
+    /// Whether resending the identical request could plausibly succeed.
+    ///
+    /// `invalidSegment` is transient by measurement, not by theory: the probe in
+    /// `Tests/reports/baseline.md` had one microphone request return an endpoint past the end
+    /// of its own chunk, and an identical retry transcribe the same audio correctly. A rejected
+    /// structured-output sample says nothing about the audio, so the chunk deserves the retry.
+    ///
+    /// Everything the client itself decided before sending — the file, its size, the chunk's
+    /// bounds — is permanent, because the second attempt would rebuild the same request from
+    /// the same finished file. So is an HTTP status that names the request or the credential.
+    public var isTransient: Bool {
+        switch self {
+        case .transportFailed, .invalidHTTPResponse, .invalidResponse, .invalidSegment:
+            true
+        case .httpFailure(let statusCode, _):
+            statusCode == 408 || statusCode == 429 || statusCode >= 500
+        case .invalidAudioURL, .unsupportedAudioFormat, .emptyAudioFile, .audioFileTooLarge,
+            .invalidChunkOffset, .invalidChunkDuration, .audioReadFailed, .requestEncodingFailed:
+            false
+        }
+    }
+}
+
 private extension OpenRouterGeminiTranscriber.TranscriptionError.SegmentFailure {
     var description: String {
         switch self {

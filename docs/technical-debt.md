@@ -132,15 +132,17 @@ duplicated across them, and a test-host crash or forced interruption can leave p
 audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives thrown
 errors, plus a documented cleanup command for what a crash leaves behind.
 
-### D22 — one malformed OpenRouter segment fails its whole chunk
-`open · P0 · reproduced behavior` — The real-recording probe in
-[`Tests/reports/baseline.md`](../Tests/reports/baseline.md) produced an out-of-duration
-provider segment on the microphone track; the client correctly rejected it, but no layer
-retried the request or retained results from independently successful work. An identical
-retry succeeded, so a transient structured-output failure currently turns the affected
-finished track into no transcript. The master remains intact.
-**Exit:** the Stage 2 failure-isolation criterion is covered by deterministic retry,
-exhaustion and partial-success tests, then reproduced on a real completed session.
+### D22 — retry and failure isolation exist, but nothing in the product runs them
+`open · P1 · code risk` — `TranscriptionRunner` now retries a transient provider failure
+within a bounded attempt budget, keeps the chunks that succeeded, and reports an exhausted
+chunk as a named hole; the reproduced out-of-duration segment from
+[`Tests/reports/baseline.md`](../Tests/reports/baseline.md) is classified transient by
+measurement and covered by deterministic retry, exhaustion, partial-success and
+classification tests. It is reachable only from a test: no session-level caller exists yet,
+which is D23. Transience is also classified for one provider only, and a local engine will
+have to classify its own.
+**Exit:** a session path drives chunks through the runner, and a forced malformed provider
+response on a real completed session leaves the other chunks and both masters available.
 
 ### D23 — the ASR evaluator bypasses the product pipeline
 `open · P1 · confirmed fact` — `scripts/openrouter-asr-eval.sh` starts from prepared fixture
