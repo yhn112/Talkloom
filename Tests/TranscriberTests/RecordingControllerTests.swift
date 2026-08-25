@@ -65,6 +65,7 @@ struct RecordingControllerTests {
         private(set) var beginCount = 0
         private(set) var endCount = 0
         private var failureHandler: (@Sendable (String) -> Void)?
+        private var retiredFailureHandler: (@Sendable (String) -> Void)?
         private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
 
         init(
@@ -105,12 +106,14 @@ struct RecordingControllerTests {
         func end() async -> TrackRecorder.Completion? {
             endCount += 1
             if endDelay > .zero { try? await Task.sleep(for: endDelay) }
+            retiredFailureHandler = failureHandler
             failureHandler = nil
             firstSampleHandler = nil
             return completion
         }
 
         func fail(_ message: String) { failureHandler?(message) }
+        func failRetiredSession(_ message: String) { retiredFailureHandler?(message) }
         func reportFirstSample(_ hostTime: UInt64) { firstSampleHandler?(hostTime) }
         var isMonitoringFirstSample: Bool { firstSampleHandler != nil }
     }
@@ -282,6 +285,36 @@ struct RecordingControllerTests {
         #expect(try manifest(in: session).failure == controller.errorMessage)
     }
 
+    @Test("a delayed runtime failure cannot stop the next session")
+    func delayedRuntimeFailureCannotStopNextSession() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let system = FakeSystemAudio()
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+
+        await controller.start()
+        let firstSession = try #require(controller.currentSession)
+        await controller.stop()
+        await controller.start()
+        let secondSession = try #require(controller.currentSession)
+        #expect(secondSession != firstSession)
+
+        await system.failRetiredSession("previous device disappeared")
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(controller.currentSession == secondSession)
+        #expect(controller.errorMessage == nil)
+        #expect(await microphone.endCount == 1)
+        #expect(await system.endCount == 1)
+        await controller.stop()
+    }
+
     /// This is inspected before stop: the final manifest already carried the offsets. The
     /// regression is specifically whether a kill during capture loses the only alignment.
     @Test("first samples reach the in-progress manifest")
@@ -415,6 +448,12 @@ struct RecordingControllerTests {
 
         #expect(controller.errorMessage == "The system track could not write audio: disk full")
         #expect(controller.lastSystemTrack?.frameCount == 24_000)
+        guard case .failed(let failureState) = controller.state else {
+            Issue.record("the failed recording had no unified failure state")
+            return
+        }
+        #expect(failureState.recording?.systemAudio?.frameCount == 24_000)
+        #expect(failureState.message == controller.errorMessage)
         let written = try manifest(in: session)
         #expect(written.failure == controller.errorMessage)
         #expect(written.tracks.first?.failure == controller.errorMessage)
@@ -484,6 +523,47 @@ struct RecordingControllerTests {
         #expect(written.status == .completed)
         #expect(written.warning == controller.warning)
         #expect(written.warning != nil)
+    }
+
+    @Test("one active session owns both capture path states and its final result")
+    func oneActiveSessionOwnsBothCapturePathStatesAndItsFinalResult() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: FakeSystemAudio(shouldFailStart: true)
+        )
+
+        await controller.start()
+        let session = try #require(controller.currentSession)
+        guard case .active(let active) = controller.state else {
+            Issue.record("the recording had no active session state")
+            return
+        }
+
+        #expect(active.session == session)
+        #expect(active.phase == .recording)
+        #expect(active.microphone == .recording)
+        guard case .unavailable(let systemFailure) = active.systemAudio else {
+            Issue.record("the failed system path was not represented as unavailable")
+            return
+        }
+        #expect(!systemFailure.isEmpty)
+        #expect(active.warning == controller.warning)
+
+        await controller.stop()
+        guard case .idle(let storedResult) = controller.state else {
+            Issue.record("the completed session was not stored with the idle state")
+            return
+        }
+        let result = try #require(storedResult)
+
+        #expect(result.session == session)
+        #expect(result.warning == active.warning)
+        #expect(controller.warning == result.warning)
+        #expect(controller.currentSession == nil)
     }
 
     @Test("a session that used both paths carries no warning")

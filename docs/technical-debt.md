@@ -12,14 +12,6 @@ reproduced failure, a violated invariant, or a path that loses user data.
 Resolved items are deleted rather than archived. Git holds that history better, and a
 list of finished work buries the open items beside it. Identifiers are never reused.
 
-## P0 — capture health
-
-### D2 — one session's state has five representations
-`open · P0 · code risk` — State is spread across `RecordingController.State`, `warning`,
-permission state, the last summaries, and the capture actors' optional recorders, and
-those sources can disagree.
-**Exit:** one active session and its two track states represented in one place.
-
 ## P0 — a truthful timeline
 
 ### D23 — a capture-path restart must preserve wall-clock time
