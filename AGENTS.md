@@ -230,6 +230,22 @@ idle is not a trade this project makes.
 Each track's first-sample timestamp is written to `session.json` beside the audio, so a
 recording explains its own timeline to whatever reads it next.
 
+### An ASR engine's timestamps are an estimate; the chunk's bounds are a measurement
+
+The offset and duration of a chunk come from this project's own recording. What an engine
+returns inside them is the model's guess at where the words fell, produced from tokenized
+audio by something that infers time rather than measuring it.
+
+So a returned timestamp outside the chunk is a bad estimate, never evidence that the words
+are wrong, and **a transcript must never be discarded because of one**. Fold the estimate
+into the measured bounds and keep the text, counting the repairs so a run with untrustworthy
+timing is visible rather than silently smoothed over. Rejecting a whole response belongs to
+responses that cannot be parsed at all.
+
+The corollary is about prompts: never state a bound the audio does not have. A model told the
+chunk is longer than it is will place words in audio that does not exist, and the error is
+this project's, not the provider's.
+
 ### Swift 6
 
 Strict concurrency is on (`SWIFT_STRICT_CONCURRENCY = complete`); do not silence

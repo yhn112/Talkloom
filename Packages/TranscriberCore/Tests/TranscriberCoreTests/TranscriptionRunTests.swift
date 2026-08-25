@@ -98,9 +98,7 @@ struct TranscriptionRunTests {
         let chunk = Self.chunk("mic")
         let transcriber = ScriptedTranscriber(outcomes: [
             "mic.wav": [
-                .failure(
-                    OpenRouterGeminiTranscriber.TranscriptionError.invalidSegment(
-                        index: 0, failure: .endBeyondChunk(end: 105.8, duration: 10))),
+                .failure(OpenRouterGeminiTranscriber.TranscriptionError.invalidResponse),
                 .success(Self.result("hello", startTime: 0)),
             ]
         ])
@@ -262,7 +260,6 @@ struct TranscriptionRunTests {
             (OpenRouterGeminiTranscriber.TranscriptionError.transportFailed("reset"), true),
             (.invalidHTTPResponse, true),
             (.invalidResponse, true),
-            (.invalidSegment(index: 0, failure: .emptyText), true),
             (.httpFailure(statusCode: 429, message: "rate limited"), true),
             (.httpFailure(statusCode: 500, message: "server error"), true),
             (.httpFailure(statusCode: 408, message: "request timeout"), true),

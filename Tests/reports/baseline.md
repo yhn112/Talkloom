@@ -265,6 +265,27 @@ response, not a timestamp overshoot. Repeated: two of the next three attempts su
 roughly the rate a bounded retry is built for, unlike the systematic overshoot that
 `ru_terms`-era diagnosis removed. It is the first evidence for the retry layer from real audio.
 
+## The rejection that was ours
+
+Requesting one real clip repeatedly — `podlodka_speech` `test/2`, 17.2436875 s — failed 3 times
+in 8. The `--raw` transport decorator captured the failing bodies, and all three were fine:
+`finish_reason: stop`, no refusal, four well-formed segments, text correct.
+
+The cause was arithmetic in this repository. The prompt stated the chunk length with `%.3f`,
+which rounded 17.2436875 **up** to `17.244`; the model, given a bound, ended its last segment
+exactly on it; and validation then rejected the response for exceeding 17.2436875. A bound
+stated one millisecond too long, obeyed precisely, and punished. Nothing was wrong at the
+provider.
+
+Fixing the rounding was not enough of an answer, because it left in place the rule that a
+timestamp may discard a transcript. That rule is now gone: a returned timestamp outside the
+chunk is folded into the bounds this project measured, the words are kept, and
+`repairedTimingCount` reports how often it happened. `AGENTS.md` states the invariant.
+
+Same clip, ten consecutive requests after the change: ten successes, and `repairedTimingCount`
+zero on all ten — the model's own endpoints now land inside the audio without help, the closest
+being 17.243 against 17.2436875.
+
 ## Real-speech corpora worth using
 
 Checked for availability, gating and licence rather than recalled.

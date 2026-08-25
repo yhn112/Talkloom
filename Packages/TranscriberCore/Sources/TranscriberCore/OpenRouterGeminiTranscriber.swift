@@ -78,16 +78,6 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
         case invalidHTTPResponse
         case httpFailure(statusCode: Int, message: String)
         case invalidResponse
-        case invalidSegment(index: Int, failure: SegmentFailure)
-
-        public enum SegmentFailure: Equatable, Sendable {
-            case nonFiniteTimestamp
-            case negativeTimestamp
-            case endBeforeStart
-            case unorderedStart
-            case endBeyondChunk(end: TimeInterval, duration: TimeInterval)
-            case emptyText
-        }
 
         public var errorDescription: String? {
             switch self {
@@ -115,8 +105,6 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                 "OpenRouter returned HTTP \(statusCode): \(message)"
             case .invalidResponse:
                 "OpenRouter returned an invalid transcription response."
-            case .invalidSegment(let index, let failure):
-                "OpenRouter returned invalid transcript segment \(index): \(failure.description)."
             }
         }
     }
@@ -296,36 +284,32 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
             throw TranscriptionError.invalidResponse
         }
 
-        var previousStart: TimeInterval = 0
-        let segments = try payload.segments.enumerated().map { index, segment in
+        var segments: [TranscriptSegment] = []
+        var repairedTimings = 0
+        var previousEnd: TimeInterval = 0
+
+        for segment in payload.segments {
             let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let failure: TranscriptionError.SegmentFailure?
-            if !segment.start.isFinite || !segment.end.isFinite {
-                failure = .nonFiniteTimestamp
-            } else if segment.start < 0 || segment.end < 0 {
-                failure = .negativeTimestamp
-            } else if segment.end < segment.start {
-                failure = .endBeforeStart
-            } else if segment.start < previousStart {
-                failure = .unorderedStart
-            } else if segment.end > chunk.duration {
-                failure = .endBeyondChunk(end: segment.end, duration: chunk.duration)
-            } else if text.isEmpty {
-                failure = .emptyText
-            } else {
-                failure = nil
-            }
-            if let failure {
-                throw TranscriptionError.invalidSegment(index: index, failure: failure)
-            }
-            previousStart = segment.start
-            return TranscriptSegment(
-                startTime: chunk.startOffset + segment.start,
-                endTime: chunk.startOffset + segment.end,
-                text: text,
-                language: segment.language,
-                source: chunk.source
-            )
+            // A segment with no words is not a timing problem; there is simply nothing to
+            // place on the timeline.
+            guard !text.isEmpty else { continue }
+
+            let placed = Self.place(
+                start: segment.start,
+                end: segment.end,
+                after: previousEnd,
+                within: chunk.duration)
+            if placed.repaired { repairedTimings += 1 }
+            previousEnd = placed.end
+
+            segments.append(
+                TranscriptSegment(
+                    startTime: chunk.startOffset + placed.start,
+                    endTime: chunk.startOffset + placed.end,
+                    text: text,
+                    language: segment.language,
+                    source: chunk.source
+                ))
         }
 
         return TranscriptionResult(
@@ -337,8 +321,51 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
                     outputTokens: $0.completionTokens,
                     totalTokens: $0.totalTokens,
                     cost: $0.cost)
-            }
+            },
+            repairedTimingCount: repairedTimings
         )
+    }
+
+    /// Places one returned segment inside the chunk that was sent.
+    ///
+    /// The chunk's bounds are a measurement this project made from its own recording; the
+    /// provider's timestamps are the model's estimate of where inside them the words fall, and
+    /// the model does not measure time — it infers it. So a timestamp outside the chunk is a
+    /// bad estimate, never evidence that the words are wrong, and the words are what the user
+    /// came for. Estimates are therefore folded into the measured bounds instead of being
+    /// allowed to discard a transcript. `repairedTimingCount` keeps that from being silent.
+    /// A non-finite timestamp needs no handling here: JSON has no such literal, and an
+    /// overflowing exponent is refused by `JSONDecoder` before this is reached, which surfaces
+    /// as `invalidResponse` and is retried.
+    static func place(
+        start: TimeInterval,
+        end: TimeInterval,
+        after previousEnd: TimeInterval,
+        within duration: TimeInterval
+    ) -> (start: TimeInterval, end: TimeInterval, repaired: Bool) {
+        var repaired = false
+
+        var placedStart = start
+        if placedStart < previousEnd {
+            placedStart = previousEnd
+            repaired = true
+        }
+        if placedStart > duration {
+            placedStart = duration
+            repaired = true
+        }
+
+        var placedEnd = end
+        if placedEnd > duration {
+            placedEnd = duration
+            repaired = true
+        }
+        if placedEnd < placedStart {
+            placedEnd = placedStart
+            repaired = true
+        }
+
+        return (placedStart, placedEnd, repaired)
     }
 
     /// The chunk's exact length is stated because the model does not measure it: it is handed
@@ -347,8 +374,24 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
     /// returned timestamps inside the audio they describe. Measured in `Tests/reports/baseline.md`.
     private static func prompt(duration: TimeInterval) -> String {
         """
-        Transcribe every spoken word in this audio chunk. Preserve the spoken language and do not translate Russian or English. This chunk is exactly \(String(format: "%.3f", duration)) seconds long; return timestamps in seconds relative to its beginning, and let no timestamp exceed its length. Remove no meaningful words, invent nothing, and return an empty segments array for silence or non-speech noise.
+        Transcribe every spoken word in this audio chunk. Preserve the spoken language and do not translate Russian or English. This chunk is exactly \(statedDuration(duration)) seconds long; return timestamps in seconds relative to its beginning, and let no timestamp exceed its length. Remove no meaningful words, invent nothing, and return an empty segments array for silence or non-speech noise.
         """
+    }
+
+    /// The chunk length as the prompt states it, rounded **down** to the millisecond.
+    ///
+    /// A model given a bound tends to end its last segment exactly on it, so a bound rounded
+    /// up is one the audio does not have: a 17.2436875 s chunk printed as `17.244` comes back
+    /// ending at 17.244, a millisecond past the recording. Stating slightly less audio than
+    /// exists costs at most a millisecond of the final word's timestamp, and keeps a rounding
+    /// artefact out of `repairedTimingCount`, which is meant to report the model's estimates
+    /// being wrong rather than this function's arithmetic.
+    static func statedDuration(_ duration: TimeInterval) -> String {
+        let milliseconds = (duration * 1000).rounded(.down)
+        // A chunk shorter than a millisecond would be stated as zero, which is worse than
+        // useless in a prompt; such a chunk cannot carry speech and is described as it is.
+        guard milliseconds >= 1 else { return String(format: "%.6f", duration) }
+        return String(format: "%.3f", milliseconds / 1000)
     }
 
     private static func providerMessage(_ message: String) -> String {
@@ -407,42 +450,20 @@ public struct OpenRouterGeminiTranscriber: Transcriber {
 extension OpenRouterGeminiTranscriber.TranscriptionError: ClassifiedTranscriptionError {
     /// Whether resending the identical request could plausibly succeed.
     ///
-    /// `invalidSegment` is transient by measurement, not by theory: the probe in
-    /// `Tests/reports/baseline.md` had one microphone request return an endpoint past the end
-    /// of its own chunk, and an identical retry transcribe the same audio correctly. A rejected
-    /// structured-output sample says nothing about the audio, so the chunk deserves the retry.
-    ///
-    /// Everything the client itself decided before sending — the file, its size, the chunk's
-    /// bounds — is permanent, because the second attempt would rebuild the same request from
-    /// the same finished file. So is an HTTP status that names the request or the credential.
+    /// A response that could not be parsed at all says nothing about the audio, so the chunk
+    /// deserves the retry. Everything the client itself decided before sending — the file, its
+    /// size, the chunk's bounds — is permanent, because the second attempt would rebuild the
+    /// same request from the same finished file. So is an HTTP status that names the request or
+    /// the credential.
     public var isTransient: Bool {
         switch self {
-        case .transportFailed, .invalidHTTPResponse, .invalidResponse, .invalidSegment:
+        case .transportFailed, .invalidHTTPResponse, .invalidResponse:
             true
         case .httpFailure(let statusCode, _):
             statusCode == 408 || statusCode == 429 || statusCode >= 500
         case .invalidAudioURL, .unsupportedAudioFormat, .emptyAudioFile, .audioFileTooLarge,
             .invalidChunkOffset, .invalidChunkDuration, .audioReadFailed, .requestEncodingFailed:
             false
-        }
-    }
-}
-
-private extension OpenRouterGeminiTranscriber.TranscriptionError.SegmentFailure {
-    var description: String {
-        switch self {
-        case .nonFiniteTimestamp:
-            "a timestamp is not finite"
-        case .negativeTimestamp:
-            "a timestamp is negative"
-        case .endBeforeStart:
-            "the end precedes the start"
-        case .unorderedStart:
-            "the start precedes the prior segment"
-        case .endBeyondChunk(let end, let duration):
-            "end \(end) exceeds chunk duration \(duration)"
-        case .emptyText:
-            "the text is empty"
         }
     }
 }
