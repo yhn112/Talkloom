@@ -29,9 +29,16 @@ let package = Package(
             name: "TranscriberCore",
             swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
         ),
+        // The report shape and fixture validation both evaluators share, so that two
+        // engines cannot be measured two different ways and then compared.
+        .target(
+            name: "ASREvalSupport",
+            dependencies: ["TranscriberCore"],
+            swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
+        ),
         .executableTarget(
             name: "OpenRouterASREval",
-            dependencies: ["TranscriberCore"],
+            dependencies: ["TranscriberCore", "ASREvalSupport"],
             swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
         ),
         .testTarget(

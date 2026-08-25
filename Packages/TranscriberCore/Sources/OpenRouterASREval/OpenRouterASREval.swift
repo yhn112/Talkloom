@@ -1,4 +1,4 @@
-import AVFoundation
+import ASREvalSupport
 import Foundation
 import TranscriberCore
 
@@ -6,15 +6,6 @@ import TranscriberCore
 /// the app. The credential comes from this process's environment and is never persisted.
 @main
 struct OpenRouterASREval {
-    private struct Report: Codable {
-        let audioFile: String
-        let audioBytes: Int
-        let audioDurationSeconds: TimeInterval
-        let elapsedSeconds: TimeInterval
-        let realTimeFactor: Double
-        let result: TranscriptionResult
-    }
-
     private enum Failure: LocalizedError {
         case usage
         case missingCredential
@@ -22,8 +13,6 @@ struct OpenRouterASREval {
         case credentialReadFailed(String)
         case unsafeCredentialFile(String)
         case invalidSource(String)
-        case invalidAudio(String)
-        case fileSizeUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -39,10 +28,6 @@ struct OpenRouterASREval {
                 "Refusing to read .openrouter.apikey: \(message)"
             case .invalidSource(let source):
                 "Unknown track source '\(source)'; use microphone or systemAudio."
-            case .invalidAudio(let reason):
-                "The evaluation input must be a finished 16 kHz mono Int16 WAV: \(reason)"
-            case .fileSizeUnavailable:
-                "Could not determine the evaluation input size."
             }
         }
     }
@@ -70,36 +55,13 @@ struct OpenRouterASREval {
         let audioURL = URL(fileURLWithPath: arguments[0]).standardizedFileURL
         let source = try trackSource(arguments.count == 2 ? arguments[1] : nil)
 
-        let audioFile: AVAudioFile
-        do {
-            audioFile = try AVAudioFile(forReading: audioURL)
-        } catch {
-            throw Failure.invalidAudio(error.localizedDescription)
-        }
-        let format = audioFile.fileFormat
-        guard format.sampleRate == 16_000 else {
-            throw Failure.invalidAudio("sample rate is \(format.sampleRate) Hz")
-        }
-        guard format.channelCount == 1 else {
-            throw Failure.invalidAudio("channel count is \(format.channelCount)")
-        }
-        guard format.commonFormat == .pcmFormatInt16 else {
-            throw Failure.invalidAudio("sample format is not Int16 PCM")
-        }
-        let duration = TimeInterval(audioFile.length) / format.sampleRate
-        guard duration.isFinite, duration > 0 else {
-            throw Failure.invalidAudio("duration is zero or invalid")
-        }
-
-        let values = try audioURL.resourceValues(forKeys: [.fileSizeKey])
-        guard let audioBytes = values.fileSize,
-            let byteLimit = OpenRouterAudioByteLimit(audioBytes)
-        else {
-            throw Failure.fileSizeUnavailable
+        let audio = try EvaluationAudio(validating: audioURL)
+        guard let byteLimit = OpenRouterAudioByteLimit(audio.byteCount) else {
+            throw EvaluationAudio.Failure.fileSizeUnavailable
         }
         if validateOnly {
             print(
-                "valid 16 kHz mono Int16 WAV: \(audioURL.lastPathComponent), \(duration)s, \(audioBytes) bytes"
+                "valid 16 kHz mono Int16 WAV: \(audio.url.lastPathComponent), \(audio.duration)s, \(audio.byteCount) bytes"
             )
             return
         }
@@ -113,23 +75,16 @@ struct OpenRouterASREval {
         let start = clock.now
         let result = try await transcriber.transcribe(
             TranscriptionChunk(
-                audioURL: audioURL,
+                audioURL: audio.url,
                 startOffset: 0,
-                duration: duration,
+                duration: audio.duration,
                 source: source))
-        let elapsedSeconds = seconds(start.duration(to: clock.now))
 
-        let report = Report(
-            audioFile: audioURL.lastPathComponent,
-            audioBytes: audioBytes,
-            audioDurationSeconds: duration,
-            elapsedSeconds: elapsedSeconds,
-            realTimeFactor: elapsedSeconds / duration,
-            result: result)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        FileHandle.standardOutput.write(try encoder.encode(report))
-        FileHandle.standardOutput.write(Data("\n".utf8))
+        try EvaluationReport(
+            audio: audio,
+            elapsedSeconds: evaluationSeconds(start.duration(to: clock.now)),
+            result: result
+        ).write()
     }
 
     private static func trackSource(_ rawValue: String?) throws -> TrackSource {
@@ -211,11 +166,5 @@ struct OpenRouterASREval {
         }
         process.waitUntilExit()
         return process.terminationStatus == 0
-    }
-
-    private static func seconds(_ duration: Duration) -> TimeInterval {
-        let components = duration.components
-        return TimeInterval(components.seconds)
-            + TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000
     }
 }
