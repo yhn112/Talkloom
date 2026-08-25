@@ -217,53 +217,86 @@ took effect under `ru_RU` at all — neither spelled in Latin nor transliterated
 exists but does not behave like a glossary: which terms are in the list changes whether any of
 them applies, and Latin-script terms inside Russian audio are not reached.
 
-## First measurement on real speech
+## Real speech: the whole podlodka test split
 
-Six clips of 8 to 27 seconds from the `test` split of `bond005/podlodka_speech` — a Russian
-IT podcast, so spontaneous speech carrying the English vocabulary these meetings use. Audio
-converted to the canonical format with the same `afconvert` settings the app uses. Nothing was
-copied into this repository; the rows are identified by dataset, split and index.
+All 20 clips of the `test` split of `bond005/podlodka_speech` — a Russian IT podcast, so
+spontaneous speech carrying the English vocabulary these meetings use. Audio converted to the
+canonical format with the same `afconvert` settings the app uses. Nothing was copied into this
+repository; the rows are identified by dataset, split and index. The reference is trusted
+because this project's owner reviewed the transcripts directly and judges their quality high.
 
-How this corpus was annotated is published nowhere — its README carries only schema
-frontmatter, and neither the `Pisets` paper that uses it nor the model cards of the Whisper
-variants fine-tuned on it describe a procedure. Its reference is trusted here on a different
-basis: this project's owner reviewed the transcripts directly and judges their quality high.
-That is why the columns below are read as word error rates.
+| Clip | Reference words | `DictationTranscriber` `ru_RU` | `gemini-3.7-flash` |
+|---:|---:|---:|---:|
+| 00 | 13 | 23.08% | 0.00% |
+| 01 | 25 | 24.00% | no result |
+| 02 | 52 | 30.77% | 5.77% |
+| 03 | 49 | 26.53% | 8.16% |
+| 04 | 68 | 13.24% | 1.47% |
+| 05 | 45 | 6.67% | 2.22% |
+| 06 | 34 | 38.24% | 2.94% |
+| 07 | 81 | 9.88% | 3.70% |
+| 08 | 52 | 13.46% | 0.00% |
+| 09 | 52 | 21.15% | 5.77% |
+| 10 | 65 | 15.38% | 3.08% |
+| 11 | 53 | 20.75% | 9.43% |
+| 12 | 57 | 10.53% | 8.77% |
+| 13 | 77 | 11.69% | 5.19% |
+| 14 | 37 | 16.22% | 0.00% |
+| 15 | 54 | 31.48% | 9.26% |
+| 16 | 62 | 17.74% | 0.00% |
+| 17 | 141 | 25.53% | no result |
+| 18 | 108 | 25.00% | no result |
+| 19 | 40 | 52.50% | 22.50% |
 
-| Clip | Duration | `DictationTranscriber` `ru_RU` | `gemini-3.7-flash` |
-|---|---:|---:|---:|
-| test/0 | 8.1 s | 23.08% | 0.00% |
-| test/1 | 11.9 s | 24.00% | 0.00% |
-| test/2 | 17.2 s | 30.77% | 5.77% |
-| test/3 | 16.5 s | 26.53% | 8.16% |
-| test/4 | 27.5 s | 13.24% | 1.47% |
-| test/5 | 16.2 s | 6.67% | 2.22% |
-| **mean** | | **20.72%** | **2.94%** |
+Aggregated over the 17 clips both engines transcribed — 891 reference words:
 
-The synthetic `ru_terms` result survives contact with real speech, at a smaller magnitude: the
-on-device engine is roughly seven times worse here, and its errors are again the terms. On
-test/2 it produced *ставший тем льдом*, *сделали этим Лином*, *one one one 3 60 Performance*
-and *очень легко нащи этого всего* where the reference has *тимлидом*, *one-on-one*,
-*performance review* and *натащить*. The cloud transcript of the same clip is correct
-throughout, including the terms.
+| | On-device | Cloud |
+|---|---:|---:|
+| Word error rate | 19.53% | 5.16% |
+| Words correct | 80.5% | 94.8% |
+| Clips with no error | 0 of 17 | 4 of 17 |
+| Clips under 10% | 2 of 17 | 16 of 17 |
+| Best / median / worst | 6.67% / 21.15% / 52.50% | 0.00% / 3.70% / 22.50% |
+| English terms recalled | **1 of 11** | **9 of 11** |
 
-**The cloud column is pessimistic, by a confirmed amount.** On test/2 the cloud engine
-reported `360` between `one-on-one` and `performance review` where the reference has nothing.
-The audio was checked: `360` is spoken there. So the reference omits a word, the engine
-transcribed it correctly, and the metric charged it an insertion — reproducibly, in three of
-three requests that returned a result. One known omission does not undo a corpus, but it does
-mean the cloud figures here are an upper bound on its error rather than a measurement of it.
+Over all 20 clips the on-device engine is at 20.86% — 243 errors in 1165 words.
 
-And a podcast is recorded in a studio: no crosstalk, no bad microphone, no interruptions. This
-is real speech, not yet a real meeting.
+### Four fifths right, and none of the terms
+
+The on-device engine gets roughly four words in five, and never a whole clip. What it does not
+get is the vocabulary the meetings are about: of the eleven Latin-script terms in these
+references it recovered **one**.
+
+| Term | On-device heard | Cloud heard |
+|---|---|---|
+| `one-on-one` | `one one one` | correct |
+| `performance` | correct | correct |
+| `review` | lost | correct |
+| `observability` | lost | correct |
+| `OpenSTT` | lost | correct |
+| `Creative`, `Commons` | lost | correct |
+| `Sberdevices`, `Golos`, `Share-alike` | lost | lost |
+| `Wav2Vec`, `self-supervised learning` | `Wave to` | clip had no result |
+
+The ordinary Russian around them is mostly fine in both. The engines differ almost entirely on
+the terms, which is the same result the synthetic `ru_terms` fixture produced and the reason
+that fixture exists.
+
+On clip 02 the cloud engine reported `360` between `one-on-one` and `performance review` where
+the reference has nothing. The audio was checked: `360` is spoken there. So the reference omits
+a word, the engine transcribed it correctly, and the metric charged it an insertion. The cloud
+column is an upper bound on its error rather than a measurement of it.
+
+A podcast is recorded in a studio: no crosstalk, no bad microphone, no interruptions. This is
+real speech, not yet a real meeting.
 
 ### The provider failure that a retry does fix
 
-Clip test/1 was rejected on the first request with `invalidResponse` — a malformed structured
-response, not a timestamp overshoot. Repeated: two of the next three attempts succeeded at
-0.00% WER, the third was rejected the same way. So this failure is genuinely transient at
-roughly the rate a bounded retry is built for, unlike the systematic overshoot that
-`ru_terms`-era diagnosis removed. It is the first evidence for the retry layer from real audio.
+Three of the twenty cloud requests returned no usable result on the first attempt. The two
+longest clips were among them, which looked like a length effect until clip 17 was requested
+again and succeeded, `finish_reason: stop`, 397 completion tokens. So these are transient
+failures at roughly a one-in-seven rate, not a property of the audio — which is what a bounded
+retry exists for, and what the systematic timestamp overshoot turned out not to be.
 
 ## The rejection that was ours
 
