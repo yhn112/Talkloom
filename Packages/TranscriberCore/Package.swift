@@ -4,8 +4,8 @@
 // 6.3, and the project already requires Xcode 26.
 import PackageDescription
 
-// The part of the app that needs neither a microphone nor a signed bundle: the WAV
-// writer, the mach-time conversion, and the session manifest.
+// The part of the app that needs neither a microphone nor a signed bundle. Its ownership
+// boundary is documented in AGENTS.md; this manifest only describes how SwiftPM builds it.
 //
 // It is a package so that `swift test` can run those tests without xcodebuild, without
 // signing, and without a test host. Everything that touches CoreAudio, AVFoundation, TCC

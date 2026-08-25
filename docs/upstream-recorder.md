@@ -26,8 +26,8 @@ third-party notice in the same change.
 | `CalendarAccess.swift` | Adapt when Stage 6 starts | The long-lived `EKEventStore`, focused event window, change observation and attendee hints are useful. Verify EventKit APIs then because this code has not been built or tested in Transcriber. |
 | `NotificationManager.swift` | Adapt when meeting integration starts | The actionable meeting-end notification and foreground presentation pattern fit Stage 6. Notification permission and signing behavior still need a local app check. |
 | `RecordingsLibrary.swift` and folder-name sanitizing | Reuse as design input | Collision avoidance and tolerant directory discovery are useful. Transcriber's manifest and later SQLite store remain the source of truth, so folder-name parsing must not become identity. |
-| `Keychain.swift` | Adapt behind a provider-neutral credential store | It demonstrates the small Security-framework surface needed by Stage 2 or 3. Preserve explicit errors and use Transcriber's stable signing identity; do not copy its delete-then-add error suppression. |
-| `GeminiTranscriber.swift` | Adapt as the Stage 2 cloud flow | The user approved the credential, resumable upload, processing poll, transcription and local-result flow. Keep it behind the provider-neutral `Transcriber` protocol. The provider and model remain separate choices; their API details are time-sensitive, and network construction must remain impossible until a key is present. |
+| `Keychain.swift` | Adapt behind a provider-neutral credential store | It demonstrates the small Security-framework surface needed by Stage 2 or 3. The first credential is an OpenRouter API key. Preserve explicit errors and use Transcriber's stable signing identity; do not copy its delete-then-add error suppression. |
+| `GeminiTranscriber.swift` | Reuse the state, result and prompt boundaries | Gemini through OpenRouter is the first cloud implementation. The upstream client calls Google's Files API directly, so its resumable upload and processing poll do not apply. OpenRouter accepts base64 `input_audio` through Chat Completions; keep that transport behind the provider-neutral `Transcriber` protocol. |
 | `RecorderPanel.swift`, preferences and meeting list | Reuse interaction patterns in Stage 6 | The compact menu-bar controls, recording library and nearby-meeting affordances fit the product. Adapt them to Transcriber's state machine and English UI rather than importing its model wholesale. |
 | `FloatRingBuffer.swift` | Compare, do not replace | It confirms the same SPSC shape already used here, but Transcriber's ring buffer, pointer lifetime rules, drop accounting and sanitizer gate are stricter and already tested. |
 | `SystemAudioTap.swift` | Use as an adversarial reference only | Tap creation, aggregate teardown and the zero-buffer rebuild path are relevant comparisons. The callback constructs objects, takes locks and calls closures; its rebuild appends across a possible format change and neither records a gap nor re-verifies signal. Those choices violate Transcriber's real-time and timeline invariants. |
@@ -53,16 +53,20 @@ It is a comparison case for D13, not evidence that D13 is resolved.
 
 ### Stage 2
 
-The upstream cloud flow is approved for adaptation: an explicitly supplied credential lives
-in Keychain; the app uploads a finished recording resumably; it waits for provider-side
-processing; starts transcription; reports progress and errors; and stores the returned
-transcript locally. Keep the implementation behind the `Transcriber` protocol and construct
-no network request until a credential exists.
+Gemini through OpenRouter is the approved first cloud implementation. An explicitly supplied
+OpenRouter credential lives in Keychain; without it the app constructs no network request.
+Finished speech chunks are sent as base64 `input_audio` to
+[OpenRouter Chat Completions](https://openrouter.ai/docs/guides/overview/multimodal/audio),
+using both denied data collection and a
+[zero-data-retention route](https://openrouter.ai/docs/guides/features/zdr), and the returned
+transcript stays local. The direct Google Files API upload and processing poll from upstream
+are not part of this transport.
 
-Provider and model selection remain independent decisions. Retain the local/cloud source
-distinction in the UI and evaluate Russian and English quality with the ASR fixtures. Do not
-inherit a preview model name or request shape without checking current first-party API
-documentation.
+Keep the implementation behind the `Transcriber` protocol, retain the local/cloud source
+distinction in the UI, and evaluate Russian and English quality with the ASR fixtures. The
+exact Gemini model remains configurable and must be measured rather than inherited from an
+upstream preview model. Check the current OpenRouter request shape and audio-capable model
+metadata before changing either.
 
 ### Stages 3 and 6
 
@@ -82,6 +86,11 @@ Transcriber's manifest, privacy rules and later SQLite store authoritative.
 - Its raw format, post-processing, echo policy, signing and cloud provider are product choices
   for a different application. They are not simplifications available to Transcriber without
   changing requirements.
+- Its Gemini transport talks directly to Google, while Transcriber uses OpenRouter. Only the
+  provider state, prompt and local-result boundaries carry across that seam.
+- OpenRouter and the chosen Gemini model expose the request shape and structured output, but
+  not Russian/English meeting WER or timestamp accuracy. The client default is an integration
+  baseline, not a quality verdict; the ASR fixtures still decide whether it is retained.
 - Its mid-file sample-rate handling, real-time callbacks and silent-tap detector are useful
   review targets precisely because they expose failure modes our stricter invariants must rule
   out.

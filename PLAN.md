@@ -40,8 +40,8 @@ separated later by clustering voice embeddings.
 │   └─ CoreAudio process tap (system audio)                        │
 │         ↓  two native-rate mono Int16 master tracks on disk      │
 │  ASR (protocol Transcriber, two implementations)                 │
-│   ├─ Local: whisper.cpp (Metal) or WhisperKit (CoreML)           │
-│   └─ Cloud: OpenAI / Deepgram, opt-in                            │
+│   ├─ Cloud: Gemini through OpenRouter, opt-in                    │
+│   └─ Local: whisper.cpp (Metal) or WhisperKit (CoreML)           │
 │         ↓  segments with timestamps                              │
 │  Diarization: v1 = channel of origin; v2 = embedding clustering  │
 │  within the system channel                                       │
@@ -95,14 +95,18 @@ the work stands.
   an explicit gap followed by signal instead of ending or compressing the session.
 
 ### Stage 2 — offline transcription (MVP)
-- whisper.cpp with Metal, or WhisperKit; a `large-v3`-class model, which is what Russian
-  needs — small models degrade far more on Russian than on English.
 - Silero VAD ahead of ASR. This is mandatory, not cosmetic: on silence Whisper emits
   confident hallucinations lifted from training subtitles.
 - Derive the 16 kHz mono tracks from the masters with `afconvert` before transcribing.
 - Transcribe both tracks after the meeting; merge by timestamp, labelling mic segments
   "me" and system segments "them".
-- A `Transcriber` protocol with a second, cloud-backed implementation behind a setting.
+- A `Transcriber` protocol whose first implementation sends finished speech chunks to
+  Gemini through OpenRouter. The OpenRouter credential is the explicit cloud opt-in and
+  lives in Keychain; without it the app constructs no request. Enabled cloud requests deny
+  provider data collection and require a zero-data-retention route.
+- A local implementation follows, using whisper.cpp with Metal or WhisperKit and a
+  `large-v3`-class model, which is what Russian needs — small models degrade far more on
+  Russian than on English.
 - ✅ Done when: record a call → get a transcript with speaker labels, measured on the
   Russian and English fixtures.
 

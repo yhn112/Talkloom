@@ -253,7 +253,8 @@ macOS 15.0 exactly so that they can.
 Two places, and the line between them is testability, not tidiness.
 
 `Packages/TranscriberCore` holds what can be verified without hardware: the WAV writer,
-the mach-time conversion, `TrackContent`, and the session manifest. Its tests run with
+the mach-time conversion, session and transcript models, and cloud clients behind a fakeable
+transport. Its tests run with
 `swift test --package-path Packages/TranscriberCore` in about a second — no xcodebuild, no
 signing, no test host — so anything that can live there should.
 
