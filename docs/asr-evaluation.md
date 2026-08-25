@@ -41,3 +41,16 @@ The package and its bundled model are MIT-licensed, but if any portion is later 
 The current measured no-VAD comparator is recorded in
 [`Tests/reports/baseline.md`](../Tests/reports/baseline.md). It is the baseline for the VAD
 experiment, not a claim about real-meeting quality.
+
+## Product-pipeline boundary
+
+The fixture runner is intentionally below the product orchestration layer. It accepts an
+already-derived WAV and calls one provider client; it does not prove that a completed app
+session can be converted, segmented, transcribed, aligned or persisted. The real-recording
+probe recorded in the baseline had to assemble those stages manually and exposed the
+provider-response failure tracked as D22 in
+[`docs/technical-debt.md`](technical-debt.md).
+
+Future quality runs must enter through the same completed-session orchestration used by the
+app. Fixture-level requests remain useful for transport and model comparisons, but they are
+not an end-to-end acceptance gate; D23 tracks replacing that false boundary.

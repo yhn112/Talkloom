@@ -132,6 +132,26 @@ duplicated across them, and a test-host crash or forced interruption can leave p
 audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives thrown
 errors, plus a documented cleanup command for what a crash leaves behind.
 
+### D22 — one malformed OpenRouter segment fails its whole chunk
+`open · P0 · reproduced behavior` — The real-recording probe in
+[`Tests/reports/baseline.md`](../Tests/reports/baseline.md) produced an out-of-duration
+provider segment on the microphone track; the client correctly rejected it, but no layer
+retried the request or retained results from independently successful work. An identical
+retry succeeded, so a transient structured-output failure currently turns the affected
+finished track into no transcript. The master remains intact.
+**Exit:** the Stage 2 failure-isolation criterion is covered by deterministic retry,
+exhaustion and partial-success tests, then reproduced on a real completed session.
+
+### D23 — the ASR evaluator bypasses the product pipeline
+`open · P1 · confirmed fact` — `scripts/openrouter-asr-eval.sh` starts from prepared fixture
+WAVs and calls the provider client directly. It does not exercise session finalization,
+`session.json`, post-recording `afconvert`, track offsets, chunking, merge or persistence. The
+first real-recording probe required those steps to be assembled by hand, so a green evaluator
+run is not evidence that the app can produce a transcript.
+**Exit:** the app and diagnostic both call one session-level orchestration path that consumes
+a completed session and produces derived tracks plus a timestamp-aligned transcript; the
+fixture runner remains only a transport-level probe.
+
 ## Intentionally retained complexity
 
 Justified by current requirements. Do not simplify these away without new evidence:

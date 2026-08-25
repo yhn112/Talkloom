@@ -37,3 +37,27 @@ The same request variance appeared on Russian speech: the first of three identic
 was rejected as an invalid segment before detailed validation diagnostics existed; the next
 two produced the exact normalized transcript at 0.740 and 0.828 xRT. A single successful run
 therefore does not establish response-schema stability.
+
+## Real recording pipeline probe
+
+A same-day manual probe started with a recording made by Transcriber.app while real Russian
+speech played through the current output device and the user spoke into the microphone. This
+was not a product end-to-end run: after the app finalized the masters, the diagnostic steps
+invoked `audio_check.py`, `afconvert` and `OpenRouterASREval` separately. No reference
+transcript was available, so this probe measures pipeline behavior and not WER or CER.
+
+| Track | Native master | Peak | Dropped samples | Timeline offset | Derived file | Successful xRT | Peak memory | Provider cost |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| System audio | 68.757 s at 48 kHz | -10.1 dBFS | 0 | 0.000 s | 68.757 s at 16 kHz | 0.106 | 33.1 MiB | $0.001965 |
+| Microphone | 67.400 s at 48 kHz | -3.5 dBFS | 0 | 1.353 s | 67.400 s at 16 kHz | 0.065 | 32.2 MiB | $0.001158 |
+
+Both masters and both derived files were healthy mono Int16 WAVs. The system result ended at
+57.00 s; an independent energy check found continuous silence from 56.15 s through the end
+of that track, so the missing tail contained no measured speech.
+
+The first microphone request failed strict validation because provider segment zero ended at
+105.80 s for a 67.40 s chunk. An identical retry succeeded with one segment from 54.44 s to
+65.98 s in track-local time. Applying the manifest offset places it at 55.793 s to 67.333 s
+on the session timeline. The retry recovered this run, but the current client has no retry or
+per-chunk failure isolation; one malformed segment therefore makes the whole request result
+unavailable.

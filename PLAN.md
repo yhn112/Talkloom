@@ -64,8 +64,10 @@ survive rebuilds.
 
 **Current stage: 2.** Stage 1 is complete: both tracks and a controlled device-switch
 restart are verified on hardware, including a native-rate change, explicit gap and signal
-after recovery. No ASR code exists yet. The stages below say what each one is, not where
-the work stands.
+after recovery. The OpenRouter client and its transport-level evaluator exist, and a real
+app recording has been carried manually through offline conversion and cloud transcription.
+The app does not yet orchestrate VAD, chunking, transcription, timeline merge or persistence
+after recording. The stages below say what each one is, not where the work stands.
 
 ### Stage 0 — skeleton
 - SwiftUI menu-bar app with a start/stop control.
@@ -100,6 +102,8 @@ the work stands.
 - Derive the 16 kHz mono tracks from the masters with `afconvert` before transcribing.
 - Transcribe both tracks after the meeting; merge by timestamp, labelling mic segments
   "me" and system segments "them".
+- Process speech chunks independently. A malformed provider result gets a bounded retry and
+  an explicit chunk failure; it must not discard other successful chunks or either master.
 - A `Transcriber` protocol whose first implementation sends finished speech chunks to
   Gemini through OpenRouter. The OpenRouter credential is the explicit cloud opt-in and
   lives in Keychain; without it the app constructs no request. Enabled cloud requests deny
@@ -107,8 +111,10 @@ the work stands.
 - A local implementation follows, using whisper.cpp with Metal or WhisperKit and a
   `large-v3`-class model, which is what Russian needs — small models degrade far more on
   Russian than on English.
-- ✅ Done when: record a call → get a transcript with speaker labels, measured on the
-  Russian and English fixtures.
+- ✅ Done when: recording a call in the app produces a persisted, timestamp-aligned transcript
+  with speaker labels without manual shell steps, measured on real Russian and English
+  speech; a forced malformed provider response proves that retries are bounded and other
+  chunks remain available.
 
 ### Stage 3 — summaries and storage
 - LLM provider selectable: Claude API for quality, Ollama for fully offline.
