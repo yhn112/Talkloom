@@ -9,8 +9,9 @@ while leaving the old floor in `api-scout` and `check-api` — the two files who
 is checking availability. Nothing caught it, because nothing was looking.
 
 This enforces the mechanical half of "one fact, one place" in `AGENTS.md`: build metadata
-is referenced from its owning build setting, version literals are not duplicated in agent
-instructions, paths do not dangle, and the two clients expose the same roles. It cannot
+is referenced from its owning build setting, version literals are not duplicated in the
+rules files, paths do not dangle, the two clients expose the same roles, every document is
+reachable from the reading list, and the rules file stays inside its size budget. It cannot
 check whether prose is still true; that stays a human job.
 
 Standard library only, and run with the system interpreter — `scripts/check.sh` calls it
@@ -60,11 +61,12 @@ def docs() -> list[Path]:
     ]
 
 
-# 1. Version literals belong to project.yml. A role or a skill that repeats one is a copy
-# that will not be updated when the floor moves.
+# 1. Version literals belong to project.yml. A rule, a role or a skill that repeats one is a
+# copy that will not be updated when the floor moves. Documents under docs/ are exempt: they
+# cite SDK availability, which is a fact about macOS rather than a copy of our own setting.
 VERSION = re.compile(r"\bmacOS\s+\d+(?:\.\d+)*")
 
-for path in sorted((ROOT / ".agents").rglob("*.md")):
+for path in [ROOT / "AGENTS.md", *sorted((ROOT / ".agents").rglob("*.md"))]:
     for line, text in numbered(path):
         for hit in VERSION.finditer(text):
             fail(path, line, f"version literal {hit.group(0)!r} — read it from project.yml")
@@ -159,6 +161,35 @@ listed = set(re.findall(r"^- `([a-z-]+)` — ", agents_md, re.MULTILINE))
 if listed != roles:
     problems.append(
         f"AGENTS.md  delegation roster {sorted(listed)} != .agents/roles {sorted(roles)}"
+    )
+
+# 9. Every document must be reachable from the reading list in AGENTS.md. A document nobody
+# is told to read goes stale unobserved and is re-derived by the next agent who needs it:
+# docs/asr-evaluation.md owned the reference-transcript policy while being absent from that
+# list, so the one document that says which numbers may be quoted was the one nobody was
+# routed to.
+reading_list = agents_md.split("## What to read, and when", 1)
+if len(reading_list) == 1:
+    problems.append("AGENTS.md  the 'What to read, and when' section is gone")
+else:
+    routed = set(re.findall(r"`(docs/[^`\s]+\.md)`", reading_list[1].split("\n## ", 1)[0]))
+    for document in sorted((ROOT / "docs").glob("*.md")):
+        reference = f"docs/{document.name}"
+        if reference not in routed:
+            problems.append(f"AGENTS.md  the reading list does not name {reference}")
+
+# 10. AGENTS.md is read in full before anything is touched, and Codex stops loading project
+# documents once they reach project_doc_max_bytes — 32 KiB by default — so every byte here is
+# spent out of each session's attention and out of the other documents' shelf space. This is
+# not a style preference. The file was cut for size once (`df15663`, 401 lines to 370) and was
+# back to 407 seven commits later, every addition individually defensible. The budget is what
+# makes a new rule displace an old one, or a measurement move to docs/ where it belonged.
+AGENTS_BUDGET = 23 * 1024
+agents_size = (ROOT / "AGENTS.md").stat().st_size
+if agents_size > AGENTS_BUDGET:
+    problems.append(
+        f"AGENTS.md  {agents_size} bytes over a budget of {AGENTS_BUDGET} — move a measurement "
+        "into docs/ or delete a rule; raising the number is a decision to argue in the commit"
     )
 
 if problems:

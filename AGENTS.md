@@ -23,10 +23,16 @@ the same change.
   before delegating.
 - `docs/technical-debt.md` — known design and correctness debt, prioritised. Read before
   starting cleanup work, and add to it when leaving something unfinished.
+- `docs/audio-format.md` — why the masters are native-rate, why conversion happens offline,
+  and why the two tracks start apart. Read before changing what capture writes to disk.
 - `docs/system-audio-capture.md` — process taps and aggregate devices, every claim cited to
   an SDK header and line. Read before touching the system-audio path.
 - `docs/speech-framework.md` — why Apple's `Speech` module is not used, and what it does and
   does not provide. Read before proposing it for recognition or for endpointing.
+- `docs/asr-evaluation.md` — what may be measured against what, which reference transcripts
+  are legitimate, and why VAD is mandatory. Read before quoting any ASR number.
+- `docs/upstream-recorder.md` — which parts of the approved upstream implementation may be
+  consulted, and where its evidence stops. Read before designing work that overlaps it.
 - `.agents/skills/*/SKILL.md` — how to build, record, diagnose a recording, measure ASR.
   Read the one that matches the task at hand.
 - `.agents/roles/*.md` — what each delegated subagent is responsible for.
@@ -81,6 +87,15 @@ and skills read them from `project.yml`. A role states scope, judgement and what
 while the procedure lives in the skill it names. "What to do next" is read as the current
 stage plus its open P0s, never kept as a third list.
 `scripts/check_docs.py` enforces the mechanical half, inside `scripts/check.sh`.
+
+The rule this file breaks most easily is its own. A rule is an invariant plus a pointer; the
+run that established it belongs in `docs/`. **A sentence here that carries a number produced
+by a measurement is in the wrong file** — move the number, keep the invariant, and the rule
+usually gets shorter and more quotable in the process. The pressure is real and constant:
+`df15663` cut this file to 370 lines, and seven commits later it was back to 407, every
+addition individually defensible. So `check_docs.py` holds it to a byte budget and requires
+every document to be reachable from the list at the top. Raising the budget means deleting
+something else first.
 
 Technical-debt records are living handoffs, not a historical notebook. Each item names
 its status, evidence, exit criterion, and the commit that introduced or resolved it when
@@ -189,46 +204,30 @@ the device reports. That file is the master. The canonical ASR format, 16 kHz mo
 disk and Float32 in `[-1, 1]` in memory for Whisper, is **derived from the master
 afterwards**, over the finished file, with `afconvert`.
 
-**Never resample on the audio path.** A resampler is a polyphase FIR holding some 30 input
-frames in its delay line, and it only releases them when the stream is declared finished. A
-drain loop can never declare that — more audio is always coming — so it abandons the
-filter's contents on every pass, and any pass that hands the converter more input than one
-call consumes loses the remainder outright, reporting success either way. Measured on a
-one-second 48 kHz tone through a 50 ms drain loop: 6% of the recording gone. The same
-conversion over a finished file is frame-exact at every rate a device might report. Nothing
-in this project needs live audio — transcription happens after the meeting.
+**Never resample on the audio path.** A live drain loop abandons the resampler's delay line
+on every pass and reports success while doing it; the same conversion over a finished file is
+frame-exact. Nothing in this project needs live audio — transcription happens after the
+meeting.
 
-`afconvert` rather than `ffmpeg` for anything the app itself runs: it ships with macOS, so
-the app does not acquire a Homebrew dependency it cannot satisfy on someone else's machine.
-`ffmpeg` stays available for the Python evaluation tooling, which only ever runs here.
-
-Keeping the master also means a better model can be re-run later against the original audio
-instead of against a downsampled copy.
-
-**Microphone and system audio are written to two separate files and never mixed.** This
-is the foundation of diarization, not an implementation detail: the split already gives
-an exact "me" vs "everyone else" for free. Any proposal to fold them into one file is a
-product regression, not an optimization.
+**Microphone and system audio are written to two separate files and never mixed.** This is
+the foundation of diarization, not an implementation detail. Any proposal to fold them into
+one file is a product regression, not an optimization.
 
 Echo cancellation is data-destructive and may start only after the running process tap
 has recorded a known active verification signal. Creating or starting the tap is not
 evidence of health. If verification fails, keep the system path running but record the
 microphone without echo cancellation, mark it as mixed, and warn that the session is
 degraded; that preserves both sides through the speakers instead of erasing the remote
-side from every usable track. The probe and the evidence behind this policy are described
-in `docs/system-audio-capture.md`.
+side from every usable track.
 
-Both tracks must share a common time origin so segments can be merged by timestamp.
-Capture each stream's start time explicitly instead of assuming the two streams start
-together — they do not. The process tap delivers its first sample almost immediately;
-the microphone's echo canceller takes about 0.75 s to come up, and some 2.7 s the first
-time in a process. That gap is accepted rather than hidden: the meeting's opening seconds
-exist only on the system side. Removing it would mean holding the microphone open before
-the user asks to record, and a transcriber that lights the microphone indicator while
-idle is not a trade this project makes.
+Both tracks must share a common time origin so segments can be merged by timestamp. Capture
+each stream's start time explicitly instead of assuming the two streams start together — they
+do not, and that gap is accepted rather than hidden. Each track's first-sample timestamp is
+written to `session.json` beside the audio, so a recording explains its own timeline to
+whatever reads it next.
 
-Each track's first-sample timestamp is written to `session.json` beside the audio, so a
-recording explains its own timeline to whatever reads it next.
+Every measurement behind this section is in `docs/audio-format.md`; the probe that gates echo
+cancellation is in `docs/system-audio-capture.md`.
 
 ### An ASR engine's timestamps are an estimate; the chunk's bounds are a measurement
 
@@ -263,8 +262,8 @@ Default `MainActor` isolation (`-default-isolation MainActor`, Swift 6.2) is del
 specifically to be off the main actor — the ring buffer, the track input, the recorders —
 and the setting would turn every one of them into an annotation exercise.
 
-Locks and atomics come from `Synchronization` in the standard library. The floor is
-macOS 15.0 exactly so that they can.
+Locks and atomics come from `Synchronization` in the standard library. The deployment floor
+in `project.yml` is set exactly so that they can.
 
 ### Where code goes
 
@@ -272,9 +271,8 @@ Two places, and the line between them is testability, not tidiness.
 
 `Packages/TranscriberCore` holds what can be verified without hardware: the WAV writer,
 the mach-time conversion, session and transcript models, and cloud clients behind a fakeable
-transport. Its tests run with
-`swift test --package-path Packages/TranscriberCore` in about a second — no xcodebuild, no
-signing, no test host — so anything that can live there should.
+transport. Its tests need no xcodebuild, no signing and no test host, so they cost a fraction
+of an app run — anything that can live there should.
 
 The app target holds everything that touches CoreAudio, AVFoundation, TCC or the UI, and
 the ring buffer with it: an audio callback calls `AudioRingBuffer.write` directly, Swift
@@ -295,10 +293,10 @@ one `@Test(arguments:)` where every row is a named case beats a dozen assertions
 test whose failure names only the test. `WAVWriterTests` is the example to copy. A test
 whose assertion is about the whole table — the ducking ranking — stays one test.
 
-Sanitizers are a separate, rare run: `scripts/sanitize.sh`, about half a minute. Required
-before calling done a change to the ring buffer, to anything holding an `Unsafe*Pointer`,
-or to actor isolation on the capture path — a green `scripts/check.sh` says nothing at all
-about a data race. Deliberately not part of that gate; the skill `build` has the procedure.
+Sanitizers are a separate, rare run: `scripts/sanitize.sh`. Required before calling done a
+change to the ring buffer, to anything holding an `Unsafe*Pointer`, or to actor isolation on
+the capture path — a green `scripts/check.sh` says nothing at all about a data race.
+Deliberately not part of that gate; the skill `build` has the procedure.
 
 Anything touching audio hardware belongs under the `DeviceTests` suite, whatever file it
 lives in. That suite is `.serialized`, and it has to be: Swift Testing runs tests in
@@ -350,11 +348,10 @@ history are in `docs/process.md`. Read it before the first commit of a session.
 
 ## What counts as verified
 
-`scripts/check.sh` is the gate for everything that does not need hardware: it regenerates
-the project, checks the instructions for drift, checks that the Python tooling starts,
-checks formatting, builds, and runs the hardware-free tests, and it exits non-zero on the
-first failure. Run it before saying a change is done. It takes about six
-seconds, so there is no reason to skip it.
+`scripts/check.sh` is the gate for everything that does not need hardware, and it exits
+non-zero on the first failure. Run it before saying a change is done; it is fast enough that
+skipping it is never justified. What it covers, and what to do when a step fails, are in the
+skill `build`.
 
 A green run there is not working capture. It is compatible with this project's signature
 failure: a valid `.wav` of exactly the right duration containing pure silence. Capture code
@@ -376,8 +373,9 @@ Ask for something specific and reproducible: what to play, what to say, how long
 the recording is meant to settle. Then analyse the files and report numbers.
 
 Synthetic audio still has its place: a constant tone of known amplitude is what makes an
-absolute level measurable at all, and it is what caught the resampler loss described above.
-Use it for arithmetic, and a person for anything that has to sound like a meeting.
+absolute level measurable at all, and it is what caught the resampler loss recorded in
+`docs/audio-format.md`. Use it for arithmetic, and a person for anything that has to sound
+like a meeting.
 
 ## Skills and delegation
 

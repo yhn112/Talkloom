@@ -15,9 +15,10 @@ scripts/check.sh
 ```
 
 Regenerates the project, checks the instructions for drift, checks that the Python tooling
-starts, checks formatting, builds, and runs the hardware-free tests — about six seconds, one line per step, non-zero exit on the
-first failure. Use it for every ordinary change; the steps below are for when something
-needs to be done by hand, and for running the app.
+starts, checks formatting, builds, and runs the hardware-free tests — about six seconds, one
+line per step, non-zero exit on the first failure. This is the gate `AGENTS.md` requires
+before a change is called done. Use it for every ordinary change; the steps below are for
+when something needs to be done by hand, and for running the app.
 
 If it reports a formatting failure, `scripts/format.sh` fixes it. If it reports a `docs`
 failure, the instructions name something that no longer exists — fix the instruction, not
@@ -189,6 +190,5 @@ two entries below outright.
 ## What to report
 
 The build result — success, or the specific errors with file and line — and, if the app
-was launched, what the logs showed. Do not paste the full `xcodebuild` output. Note that
-a successful build does not demonstrate that a change works: anything touching audio is
-only verified through a real recording.
+was launched, what the logs showed. Do not paste the full `xcodebuild` output. A successful
+build is not evidence that a change works (`AGENTS.md`, "What counts as verified").

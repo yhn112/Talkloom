@@ -7,7 +7,8 @@ description: Measure recognition quality in Russian and English — WER, CER, ha
 
 ASR changes are accepted on measurement, not on impression. "Sounds better" is not a
 result: a change that improves English usually degrades Russian, and loosening filters
-"for completeness" brings back hallucinations that a short sample won't reveal.
+"for completeness" brings back the hallucinations `docs/asr-evaluation.md` records, which a
+short sample will not reveal.
 
 ## Fixtures
 

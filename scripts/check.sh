@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# The project's one gate: everything that can be verified without a microphone.
+# The project's one gate: everything that can be verified without a microphone. Each
+# numbered step below states what it protects against. One line per step, non-zero exit on
+# the first failure, so an agent can treat it as the definition of "done" for anything short
+# of a real recording.
 #
-# Regenerates the project, checks the instructions for drift, checks that the Python
-# tooling starts, checks formatting, builds, and runs the tests that need no hardware. Prints one line per step and exits non-zero on the first failure, so an agent
-# can treat it as the definition of "done" for anything short of a real recording.
-#
-# What this deliberately does NOT cover: capture correctness. A green run here is
-# compatible with a valid WAV full of silence. That still takes a real recording — the
-# `TranscriberDeviceTests` scheme and the `audio-doctor` skill.
+# What a green run here does not establish — and why capture correctness still takes a real
+# recording — is in AGENTS.md, "What counts as verified".
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

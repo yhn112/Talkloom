@@ -97,10 +97,8 @@ after recording. The stages below say what each one is, not where the work stand
   an explicit gap followed by signal instead of ending or compressing the session.
 
 ### Stage 2 — offline transcription (MVP)
-- Silero VAD ahead of ASR. This is mandatory, not cosmetic: on silence Whisper emits
-  confident hallucinations lifted from training subtitles, and the OpenRouter baseline
-  reproduced the same behaviour. macOS supplies no voice-activity detector that can run in
-  front of another engine — see [`docs/speech-framework.md`](docs/speech-framework.md).
+- Silero VAD ahead of ASR — mandatory rather than cosmetic. The evidence and the assessment
+  of the candidate package are in [`docs/asr-evaluation.md`](docs/asr-evaluation.md).
 - Derive the 16 kHz mono tracks from the masters with `afconvert` before transcribing.
 - Transcribe both tracks after the meeting; merge by timestamp, labelling mic segments
   "me" and system segments "them".
@@ -149,8 +147,8 @@ building Stage 2 on top of the recorded timeline.
 
 - **Process tap behaviour under device changes** is the least documented part of the
   capture path; budget time for it.
-- **Whisper hallucinations on silence** — VAD is the mitigation, plus filtering on
-  log-probability and compression ratio.
+- **Hallucinations on silence**, in every engine measured so far — VAD is the mitigation,
+  settled in [`docs/asr-evaluation.md`](docs/asr-evaluation.md).
 - **Mixed Russian and English within one meeting** — Whisper detects language per chunk,
   so detection oscillates; if it hurts, force the language per meeting.
 - **A `large-v3` model needs roughly 3 GB of RAM** — make model size configurable.

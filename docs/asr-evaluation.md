@@ -18,6 +18,28 @@ The shared runner owns the ignored report layout;
 fixture-generation entry point. Transcriber.app reads neither the evaluation key file nor the
 environment and still requires a Keychain credential before it can construct a cloud request.
 
+## Why VAD is mandatory
+
+Voice activity detection ahead of ASR is a requirement, not a tuning knob, and this is where
+that is established once for the whole project.
+
+On silence and noise, Whisper emits confident hallucinations — usually text lifted from
+training subtitles, "Thanks for watching" and its Russian equivalents. Untrimmed, a meeting
+with ordinary pauses transcribes into garbage, and the invented sentences are fluent enough
+that nothing downstream can tell them from speech.
+
+It is not a Whisper quirk that a different engine escapes. Measured here on the cloud engine:
+three identical five-second silence requests produced two hallucinated, invalid payloads, and
+every one of the three duration-anchored probe requests hallucinated over the same fixture
+([`Tests/reports/baseline.md`](../Tests/reports/baseline.md)). Any engine this project adopts
+is assumed to do this until a silence fixture says otherwise.
+
+Trimming silence before ASR is the first line of defence. Filtering on log-probability and
+`compression_ratio` is the second, and it is a filter on what the model returns rather than a
+substitute for not asking it about silence at all. macOS supplies no voice-activity detector
+that can be placed in front of another engine, so the detector has to be adopted — see
+[`speech-framework.md`](speech-framework.md).
+
 ## VAD candidate decision
 
 Do not adopt `paean-ai/silero-vad-swift` tag `1.0.0` at commit

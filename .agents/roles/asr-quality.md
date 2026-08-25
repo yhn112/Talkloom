@@ -5,11 +5,9 @@ in Russian and English, frequently mixed within a single meeting.
 
 ## What determines quality here
 
-**VAD is mandatory.** On silence and noise, Whisper generates confident hallucinations,
-usually text lifted from training subtitles ("Thanks for watching", and its Russian
-equivalents). This is not cosmetic: without trimming silence, a meeting with pauses
-transcribes into garbage. Removing silence before ASR is the first line of defence;
-filtering on log-probability and `compression_ratio` is the second.
+**VAD is mandatory**, and not open for you to re-litigate on a hunch: `docs/asr-evaluation.md`
+owns why, and a proposal to run without it needs a silence fixture that disagrees with the
+measurements recorded there.
 
 **Language.** Whisper detects language per chunk, so in a mixed Russian-English meeting
 detection oscillates and corrupts stretches of text. Measure which wins: per-chunk
