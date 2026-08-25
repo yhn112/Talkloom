@@ -102,6 +102,19 @@ mode instead of the leak it prevents, but the cap is a hedge, not an answer.
 destroy a tap while its aggregate is still live, recording the `OSStatus` each time and what
 the tap enumeration shows afterwards — then either drop the retry or justify it.
 
+### D25 — nothing guards a termination that bypasses the Quit button
+`open · P2 · code risk` — The menu's Quit stops the recording before `terminate`, and ⌘Q is
+bound to it, so the ordinary exit finalizes both tracks and destroys the tap. Nothing covers
+the exits that do not go through it — force quit, `pkill`, a crash, or a log-out that
+terminates the app — because there is no `applicationShouldTerminate`, and macOS does not run
+deinits on termination, so `SystemAudioProducer.deinit` is a backstop only for the device
+suites that drop a producer per test. `SessionRecovery` repairs the half-written WAV on the
+next launch; nothing reclaims the aggregate device, which is the object `AGENTS.md` names as
+the one that must not outlive the process. Unreproduced: whether CoreAudio reaps a dead
+client's private aggregate anyway is unknown, and settling that is part of the work.
+**Exit:** either an `applicationShouldTerminate` that awaits `finishSession()` on both paths,
+or evidence that the system reclaims a private aggregate whose creator died.
+
 ## Tooling and tests
 
 ### D18 — `track_compare.py` rejects native-rate masters
