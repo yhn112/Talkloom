@@ -50,12 +50,15 @@ experiment, not a claim about real-meeting quality.
 ## A reference is only as good as its provenance
 
 A fixture's reference text has to be traceable to people who wrote it down, and that has to be
-checked before any number is quoted from it. A corpus whose transcripts were produced by an ASR
-model — or whose production is simply undocumented — can still be used to compare two engines
-against each other, because both are wrong against the same text. It cannot be used to say what
-either engine's word error rate is. `Tests/reports/baseline.md` records which corpora were
-checked and what was found; two of them turned out to state their human transcription process
-in detail and one turned out to state nothing at all.
+established before any number is quoted from it. A corpus whose transcripts were produced by an
+ASR model can still be used to compare two engines against each other, because both are wrong
+against the same text; it cannot be used to say what either engine's word error rate is.
+
+Published documentation is one way to establish it and direct review is another. Where a corpus
+documents nothing, someone reading its transcripts against its audio and vouching for them is
+evidence — recorded as such, naming who did it, so a later reader knows the basis is a person
+rather than a paper. `Tests/reports/baseline.md` records which corpora were checked, what was
+found, and which known defects survive in the ones being used.
 
 ## A tiered engine is a candidate, not a decision
 

@@ -224,13 +224,11 @@ IT podcast, so spontaneous speech carrying the English vocabulary these meetings
 converted to the canonical format with the same `afconvert` settings the app uses. Nothing was
 copied into this repository; the rows are identified by dataset, split and index.
 
-**Read the column headings as agreement, not as word error rate.** How this dataset's
-transcripts were produced is undocumented — its README carries only schema frontmatter, and
-neither the `Pisets` paper that uses the corpus nor the model cards of the Whisper variants
-fine-tuned on it describe an annotation procedure. A reference of unknown provenance cannot
-establish that a transcript is correct; it can only establish that two engines disagree with
-it by different amounts. Both engines were scored against the same text, so the ratio between
-the columns is the part worth keeping.
+How this corpus was annotated is published nowhere — its README carries only schema
+frontmatter, and neither the `Pisets` paper that uses it nor the model cards of the Whisper
+variants fine-tuned on it describe a procedure. Its reference is trusted here on a different
+basis: this project's owner reviewed the transcripts directly and judges their quality high.
+That is why the columns below are read as word error rates.
 
 | Clip | Duration | `DictationTranscriber` `ru_RU` | `gemini-3.7-flash` |
 |---|---:|---:|---:|
@@ -249,17 +247,15 @@ and *очень легко нащи этого всего* where the reference h
 *performance review* and *натащить*. The cloud transcript of the same clip is correct
 throughout, including the terms.
 
-Two cautions beyond the provenance. On test/2 the cloud engine reported `360` between
-`one-on-one` and `performance review` where the reference has nothing — plausibly the reference
-being incomplete rather than the engine inventing, which is the sort of thing an unverified
-reference does to a measurement. And a podcast is recorded in a studio: no crosstalk, no bad
-microphone, no interruptions. This is real speech, not yet a real meeting.
+**The cloud column is pessimistic, by a confirmed amount.** On test/2 the cloud engine
+reported `360` between `one-on-one` and `performance review` where the reference has nothing.
+The audio was checked: `360` is spoken there. So the reference omits a word, the engine
+transcribed it correctly, and the metric charged it an insertion — reproducibly, in three of
+three requests that returned a result. One known omission does not undo a corpus, but it does
+mean the cloud figures here are an upper bound on its error rather than a measurement of it.
 
-One argument that the references are not simply an ASR model's output: the corpus is used to
-fine-tune Whisper, and the resulting `Whisper-Podlodka-V3` measurably differs from
-`Whisper-Large-V3`, winning under added noise. Training a model on its own predictions would
-not do that. It is an inference from a published result, not documentation, and it is not
-enough to call the corpus a reference.
+And a podcast is recorded in a studio: no crosstalk, no bad microphone, no interruptions. This
+is real speech, not yet a real meeting.
 
 ### The provider failure that a retry does fix
 
@@ -282,18 +278,20 @@ from, so it is checked rather than assumed.
 | `distil-whisper/earnings22` | Real accented English earnings calls, entity-dense, 119 h | Rev's human transcription platform, verbatim, each transcript verified by a separate group of graders | see repository | ungated |
 | `bond005/sova_rudevices` | Russian live speech, 100 h at 16 kHz | Manual annotation, stated by the corpus itself. Its `RuYoutube` partition is ASR-annotated and must not be used as a reference | CC BY 4.0 | ungated |
 | `Shelton1013/SwitchLingua_audio` | Real recorded code-switching including Russian-English, 80 h | not established | CC BY-NC-SA 4.0 | gated, account required |
-| `bond005/podlodka_speech` | Russian IT podcast, spontaneous, English terms throughout; 107 clips, 188 MB | **not documented anywhere found** | none stated | ungated |
+| `bond005/podlodka_speech` | Russian IT podcast, spontaneous, English terms throughout; 107 clips, 188 MB | Not published anywhere found; reviewed directly by this project's owner, who judges the quality high. One omission is known, above | none stated | ungated |
 
 AMI matters beyond being real: it carries close-talking headset audio and distant-microphone
 audio of the same meeting, which is the closest public analogue of this project's two tracks.
 
-No public corpus was found of Russian meetings carrying English technical vocabulary — the
-exact material this app is for. `podlodka_speech` is the nearest by content and the weakest by
-provenance; SOVA RuDevices has the human annotation but is device-directed utterances rather
-than technical conversation; SwitchLingua is the only Russian-English code-switching audio at
-all and is gated. So the two corpora that can carry a WER claim are both English, and the gap
-that matters most is exactly the one no public data fills. That is why a recording made here
-still has to happen.
+No public corpus was found of Russian *meetings* carrying English technical vocabulary.
+`podlodka_speech` is much the nearest — spontaneous Russian technical conversation with a
+reference this project trusts — and what it lacks is the meeting itself: two speakers on
+separate microphones, crosstalk, interruptions, a bad room. SOVA RuDevices has documented
+manual annotation but is device-directed utterances rather than conversation. SwitchLingua is
+the only Russian-English code-switching audio at all, and is gated.
+
+So podlodka carries the language and the vocabulary, AMI carries the meeting and the two-track
+recording, and nothing public carries both. A recording made here is what closes that.
 
 ## Real recording pipeline probe
 
