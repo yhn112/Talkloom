@@ -62,12 +62,14 @@ that pairs with it; the `inputSequence:` initializer (209) is for a live stream 
 
 ## Not established
 
-- **Recognition quality on Russian and English meetings.** Nothing here is a quality claim.
-  Only an `asr-eval` run against the fixtures can compare this with a `large-v3`-class model,
-  and it has not been run.
-- **Whether analysis needs a TCC grant.** `SFSpeechRecognizer.authorizationStatus()` stayed
-  `notDetermined` and no prompt appeared, but the probe stopped before a successful analysis,
-  so this proves nothing about the run that matters.
+- **Recognition quality on real meetings.** The synthetic fixtures have since been measured
+  and the numbers are in [`Tests/reports/baseline.md`](../Tests/reports/baseline.md), but
+  synthesis overstates quality for every engine equally. Nothing here has been compared with a
+  `large-v3`-class model, and nothing has been run on real speech in a real room.
+- **Whether a bundled app needs a TCC grant.** Analysis has since run to completion from a
+  command-line tool with `SFSpeechRecognizer.authorizationStatus()` at `notDetermined` and no
+  prompt shown, so the engine does not demand a grant to run. Whether a signed, bundled app
+  behaves the same is not established, and TCC decisions are made per bundle.
 - **What the asset download costs** in bytes, time, or network access at analysis time.
 
 ## What follows for this project
@@ -75,3 +77,9 @@ that pairs with it; the `inputSequence:` initializer (209) is for a live stream 
 Moving the deployment floor to macOS 26 buys a first-party Russian recogniser that brings its
 own endpointing — not a VAD. A VAD in front of the OpenRouter engine is needed either way, so
 that choice is independent and does not have to wait for this one.
+
+What the measurement then added: the engine returns **word-level** time ranges through the
+`audioTimeRange` attribute on its result text, and produced no text at all on silence. So for
+the Apple path the separate VAD stops being necessary — the word gaps are the pauses — while
+its single-locale requirement makes a sentence that switches language mid-way the case it
+handles worst. Both are in the baseline.

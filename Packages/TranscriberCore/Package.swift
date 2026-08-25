@@ -23,6 +23,9 @@ let package = Package(
         // A non-shipping integration probe. It is the narrow path for measuring the live
         // provider before credential UI and the finished-session pipeline exist.
         .executable(name: "OpenRouterASREval", targets: ["OpenRouterASREval"]),
+        // The same probe for Apple's on-device engine, which is the other candidate
+        // for stage 2 and the only one that needs no model file of its own.
+        .executable(name: "AppleSpeechASREval", targets: ["AppleSpeechASREval"]),
     ],
     targets: [
         .target(
@@ -38,6 +41,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "OpenRouterASREval",
+            dependencies: ["TranscriberCore", "ASREvalSupport"],
+            swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
+        ),
+        .executableTarget(
+            name: "AppleSpeechASREval",
             dependencies: ["TranscriberCore", "ASREvalSupport"],
             swiftSettings: [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
         ),

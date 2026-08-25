@@ -38,6 +38,60 @@ was rejected as an invalid segment before detailed validation diagnostics existe
 two produced the exact normalized transcript at 0.740 and 0.828 xRT. A single successful run
 therefore does not establish response-schema stability.
 
+## Apple on-device engine, same fixtures
+
+Measured on 2026-08-25 with `DictationTranscriber` plus `SpeechDetector` through
+`SpeechAnalyzer` on macOS 26.6.2, against fixtures regenerated the same day by
+`scripts/generate-asr-smoke-fixtures.sh`. The engine has to be told the language, so each
+fixture was run under the locale named below; the cloud engine detects it instead.
+
+| Fixture | Locale | WER | CER | Substitutions | Deletions | Insertions | xRT | Peak memory | Outcome |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `ru_short` | `ru_RU` | 0.00% | 0.00% | 0 | 0 | 0 | 0.098 | 18.6 MiB | Exact normalized transcript |
+| `en_short` | `en_US` | 0.00% | 0.00% | 0 | 0 | 0 | 0.112 | 18.7 MiB | Exact normalized transcript |
+| `long_pause` | `en_US` | 0.00% | 0.00% | 0 | 0 | 0 | 0.048 | 18.7 MiB | Both utterances retained across the pause |
+| `mixed_short` | `ru_RU` | 71.43% | 41.86% | 4 | 1 | 0 | 0.146 | 18.7 MiB | English clause destroyed: `api gateway and retry policy` → `это gate man halsey` |
+| `mixed_short` | `en_US` | 28.57% | 32.56% | 1 | 1 | 0 | 0.173 | 18.8 MiB | English clause exact, Russian words lost |
+| `silence` | `ru_RU` | — | — | — | — | — | 0.032 | 18.0 MiB | No text |
+| `silence` | `en_US` | — | — | — | — | — | 0.034 | 18.0 MiB | No text |
+
+Two facts here are not in the cloud table. **Silence produced no text in either locale**,
+where the cloud engine hallucinates on the same file. And the returned timestamps are
+per word, not per utterance: `long_pause` came back as 12 word segments whose gap runs from
+1.77 s to 5.64 s, which is the four-second silence the fixture was built around, located
+without a VAD.
+
+The mixed-language rows are the cost of a per-run locale. Whichever language is chosen, the
+other one is damaged, and no single run of this engine handles a sentence that switches
+language mid-way — which the cloud engine did at 14.29% WER.
+
+Asset installation is required once per locale before any of this runs; `ru_RU` and `en_US`
+were installed on this machine during the measurement.
+
+## Cloud re-run on the regenerated fixtures
+
+Run the same day, through the same client, to compare both engines on identical audio rather
+than on a recollection of the audio above.
+
+| Fixture | Result | xRT | Provider cost |
+|---|---|---:|---:|
+| `ru_short` | WER 0.00%, CER 0.00% | 0.992 | $0.000461 |
+| `long_pause` | WER 0.00%, CER 0.00% | 0.486 | $0.000691 |
+| `en_short` | Rejected: segment 0 ended at 4.16 s for a 3.812 s chunk | — | unavailable |
+| `mixed_short` | Rejected: segment 0 ended at 3.94 s for a 3.476 s chunk | — | unavailable |
+| `silence` | Hallucinated Russian prose over five seconds of digital silence | 0.691 | $0.000520 |
+
+`en_short` was then requested three more times and `mixed_short` once more. Every one was
+rejected the same way, with a different overshoot each time — `en_short` ended at 4.64 s,
+4.54 s and 4.54 s against its 3.812 s of audio, and `mixed_short` at 4.12 s against 3.476 s.
+
+**This falsifies the transience premise recorded for D22.** The earlier real-recording probe
+saw an identical retry succeed once; on these fixtures the same failure is reproducible across
+four consecutive attempts, so a bounded retry would exhaust its budget and still lose the
+chunk. The provider's absolute end timestamps are simply unreliable — they overshot by 9% to
+22% here and by 57% on the 67.4 s real-recording chunk — and the client currently discards a
+correct transcript because of them.
+
 ## Real recording pipeline probe
 
 A same-day manual probe started with a recording made by Transcriber.app while real Russian

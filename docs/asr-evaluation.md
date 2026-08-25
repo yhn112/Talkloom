@@ -6,9 +6,14 @@ credential, routing, audio encoding, structured response and timestamp behavior 
 second variable changes the audio boundaries. It is transport evidence, not a production
 pipeline and not evidence about real meeting quality.
 
-The non-shipping runner enforces the local credential boundary described in `AGENTS.md`
-without reading the secret; only `OpenRouterASREval` reads the fixed ignored file.
-`scripts/openrouter-asr-eval.sh` owns the invocation and the ignored report layout;
+`scripts/asr-eval.sh` owns the measurement — fixture selection, timing, memory, hypothesis
+extraction and metrics — for every engine, so that two candidates cannot be measured two
+different ways and then compared. Engine-specific setup lives in a wrapper above it:
+`scripts/openrouter-asr-eval.sh` enforces the local credential boundary described in
+`AGENTS.md` without reading the secret, and only `OpenRouterASREval` reads the fixed ignored
+file. `AppleSpeechASREval` has no credential and instead needs its on-device model installed
+once per locale, which its `--install-assets` flag does.
+The shared runner owns the ignored report layout;
 [`Tests/fixtures/README.md`](../Tests/fixtures/README.md) owns the local setup and
 fixture-generation entry point. Transcriber.app reads neither the evaluation key file nor the
 environment and still requires a Keychain credential before it can construct a cloud request.

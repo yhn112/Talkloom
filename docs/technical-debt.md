@@ -133,16 +133,28 @@ audio on disk. **Exit:** one harness whose cleanup is `defer`-based and survives
 errors, plus a documented cleanup command for what a crash leaves behind.
 
 ### D22 — retry and failure isolation exist, but nothing in the product runs them
-`open · P1 · code risk` — `TranscriptionRunner` now retries a transient provider failure
-within a bounded attempt budget, keeps the chunks that succeeded, and reports an exhausted
-chunk as a named hole; the reproduced out-of-duration segment from
-[`Tests/reports/baseline.md`](../Tests/reports/baseline.md) is classified transient by
-measurement and covered by deterministic retry, exhaustion, partial-success and
-classification tests. It is reachable only from a test: no session-level caller exists yet,
-which is D23. Transience is also classified for one provider only, and a local engine will
-have to classify its own.
+`open · P1 · code risk` — `TranscriptionRunner` retries a transient provider failure within a
+bounded attempt budget, keeps the chunks that succeeded, and reports an exhausted chunk as a
+named hole, covered by deterministic retry, exhaustion, partial-success and classification
+tests. It is reachable only from a test: no session-level caller exists yet, which is D23.
+Transience is also classified for one provider only, and a local engine will have to classify
+its own. The `.endBeyondChunk` classification specifically is now known to be wrong — see D24.
 **Exit:** a session path drives chunks through the runner, and a forced malformed provider
 response on a real completed session leaves the other chunks and both masters available.
+
+### D24 — a correct transcript is discarded over an unreliable provider timestamp
+`open · P0 · reproduced behavior` — The client rejects the whole response when a segment ends
+past the chunk's duration. The fixture re-run in
+[`Tests/reports/baseline.md`](../Tests/reports/baseline.md) shows the provider overshooting the
+end of the audio on 3 of 5 fixtures, reproducibly across four consecutive identical requests
+with a different overshoot each time, so this is not the transient sample the earlier probe
+suggested and a retry cannot recover it. The text in those responses was not examined before
+being thrown away, and the audio physically cannot extend past the file, so an end beyond the
+chunk is a bad timestamp rather than a bad transcript.
+**Exit:** an end that overshoots is clamped to the chunk within a stated tolerance and the
+segment kept, with the overshoot recorded; beyond that tolerance the response is still
+rejected. The tolerance is chosen from measured overshoots, not picked, and covered by table
+tests at and beyond its boundary.
 
 ### D23 — the ASR evaluator bypasses the product pipeline
 `open · P1 · confirmed fact` — `scripts/openrouter-asr-eval.sh` starts from prepared fixture
