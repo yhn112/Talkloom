@@ -25,7 +25,7 @@ fi
 
 fixtures=("$@")
 if [ ${#fixtures[@]} -eq 0 ]; then
-    fixtures=(ru_short en_short mixed_short long_pause silence)
+    fixtures=(ru_short en_short mixed_short ru_terms long_pause silence)
 fi
 
 # Extra arguments for the evaluator, word-split deliberately. An engine that has to be told

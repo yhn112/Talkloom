@@ -66,8 +66,15 @@ ffmpeg -hide_banner -loglevel error -y \
     -filter_complex '[0:a][1:a][2:a]concat=n=3:v=0:a=1[out]' \
     -map '[out]' -ar 16000 -ac 1 -c:a pcm_s16le "$fixture_directory/long_pause.wav"
 
+# Russian speech carrying the English technical vocabulary these meetings actually use.
+# The other fixtures are clean enough that an engine can fail this one completely and still
+# score zero WER on all of them.
+say_wave Milena "$scratch/ru-terms.wav" \
+    'Мы задеплоили сервис в Kubernetes, ClickHouse отвечает медленно, надо проверить идемпотентность ретраев.'
+canonical_wave "$scratch/ru-terms.wav" "$fixture_directory/ru_terms.wav"
+
 ffmpeg -hide_banner -loglevel error -y \
     -f lavfi -t 5 -i 'anullsrc=r=16000:cl=mono' \
     -ar 16000 -ac 1 -c:a pcm_s16le "$fixture_directory/silence.wav"
 
-echo "generated 5 synthetic ASR fixtures in $fixture_directory"
+echo "generated 6 synthetic ASR fixtures in $fixture_directory"

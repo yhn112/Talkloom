@@ -61,10 +61,21 @@ so a weak stretch can be named in seconds and cut out of the derived track exact
 the escalated chunk's position on the timeline is then known from our own boundaries, the cloud
 engine would be asked only for text — the one thing it does reliably.
 
-What is not established, and has to be before this becomes a plan: whether confidence predicts
-error well enough to route on, which it demonstrably does not do at the level of a single word;
-what rule combines two runs without losing words; and what any of this looks like on real
-speech rather than on one synthetic sentence.
+The `ru_terms` measurement then made the case for tiering much stronger and the detector much
+weaker at once. The two engines are not close where it counts — 83.33% against 0.00% WER on
+Russian speech carrying English technical vocabulary — so there is a great deal to gain. But
+per-word confidence does not find those errors: the most confident wrong word in that utterance
+scored 0.914 while a correct word scored 0.275. Escalating on it would skip most of what needs
+escalating.
+
+What is therefore unresolved: which local signal actually marks a hard span. Mean confidence
+over a span separates a term-dense utterance from a clean one only 0.580 to 0.812, and
+divergence among the engine's own `alternatives` lined up with the damaged regions but has not
+been measured. Contextual strings are not a substitute — they change recognition, but which
+terms are in the list determines whether any of them applies, and Latin-script terms inside
+Russian audio are not reached at all.
+
+None of it has been seen on real speech rather than on synthesized sentences.
 
 ## Product-pipeline boundary
 

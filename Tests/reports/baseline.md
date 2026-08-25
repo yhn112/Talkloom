@@ -157,6 +157,66 @@ and again in this run, and those hallucinations now carry **valid** timestamps. 
 out-of-duration check had been rejecting some of them by accident; it was never a defence
 against invented speech and must not be counted as one. Only VAD is.
 
+## Technical terms: where the two engines actually diverge
+
+The fixtures above are clean enough that both engines score 0.00% on Russian and English, which
+made them look equivalent. `ru_terms` was added because these meetings are Russian speech
+carrying English technical vocabulary, and nothing else measured that.
+
+Reference: *Мы задеплоили сервис в Kubernetes, ClickHouse отвечает медленно, надо проверить
+идемпотентность ретраев.*
+
+| Engine | WER | CER | Substitutions | Insertions | xRT | Cost |
+|---|---:|---:|---:|---:|---:|---:|
+| `DictationTranscriber` `ru_RU` | 83.33% | 25.74% | 6 | 4 | 0.122 | — |
+| `gemini-3.7-flash` | 0.00% | 0.00% | 0 | 0 | 0.795 | $0.001159 |
+
+The on-device result is *Мы за дипло или сервис Uber Fit house отвечает медленно надо проверить
+импотент нность или драй*. Every term is destroyed and the ordinary Russian between them is
+perfect. The cloud transcript is the reference verbatim, and it was produced **without any
+glossary in the prompt**; supplying one changed only sentence punctuation.
+
+### Confidence does not find these errors
+
+Per-word confidence from the same on-device run, wrong words in the left column:
+
+| Wrong | Confidence | Correct | Confidence |
+|---|---:|---|---:|
+| или | **0.914** | проверить | 0.920 |
+| за | 0.828 | медленно | 0.903 |
+| нность | 0.715 | отвечает | 0.893 |
+| дипло | 0.631 | надо | 0.848 |
+| house | 0.435 | сервис | 0.677 |
+| импотент | 0.384 | Мы | **0.275** |
+| Fit | 0.273 | | |
+| Uber | 0.201 | | |
+| драй | 0.112 | | |
+
+A threshold at 0.5 flags six of the ten wrong words, misses four — including `или` at 0.914,
+which is the single most confident wrong word in the utterance — and falsely flags the correct
+`Мы` at 0.275. The engine is *confidently wrong* on exactly the material worth escalating,
+which is the documented failure mode for out-of-vocabulary terms.
+
+Mean confidence over the whole utterance is 0.580 against 0.812 for the clean `ru_short`. That
+span-level gap is real but far narrower than the 2.7–9× gap that separates locales, so routing
+whole chunks on it is a lead to validate, not a rule to adopt.
+
+The `alternatives` array diverged where the transcript was mangled — `дипло | Diplo`,
+`Uber Fit | Uber | Uber FL` — and not elsewhere. Disagreement among alternatives is a second
+local signal, unmeasured.
+
+### Contextual strings work, and are brittle
+
+`AnalysisContext.contextualStrings` demonstrably changes recognition. English: *Vade* became
+*Vaidehi* when the name was supplied, repeatably, with a one-term and a five-term list.
+Russian: an unfamiliar name was fixed the same way, and `импотент нность или драй` became
+`идемпотентность драй` when `идемпотентность` alone was supplied, three times out of three.
+
+Adding `ретраев` to that list reverted the fix, three times out of three, and `Kubernetes` never
+took effect under `ru_RU` at all — neither spelled in Latin nor transliterated. So the mechanism
+exists but does not behave like a glossary: which terms are in the list changes whether any of
+them applies, and Latin-script terms inside Russian audio are not reached.
+
 ## Real recording pipeline probe
 
 A same-day manual probe started with a recording made by Transcriber.app while real Russian
