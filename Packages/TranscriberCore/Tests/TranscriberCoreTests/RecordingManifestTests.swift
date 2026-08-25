@@ -12,6 +12,8 @@ struct RecordingManifestTests {
     ) -> TrackReport {
         TrackReport(
             file: "\(label).wav",
+            source: label == "mic" ? .microphone : .systemAudio,
+            segmentIndex: 0,
             content: content,
             sampleRate: 48_000,
             frameCount: frameCount,
@@ -28,6 +30,8 @@ struct RecordingManifestTests {
     ) -> TrackReport {
         TrackReport(
             file: "\(label).wav",
+            source: .systemAudio,
+            segmentIndex: 0,
             content: .remote,
             sampleRate: 48_000,
             frameCount: frameCount,
@@ -153,6 +157,55 @@ struct RecordingManifestTests {
         #expect(abs(try #require(track.spans?.first?.startOffset) - 0.5) < 0.001)
         #expect(track.gaps?.first?.fileFrameOffset == 0)
         #expect(track.gaps?.first?.frameCount == 24_000)
+    }
+
+    @Test("native-rate segments remain one logical track")
+    func nativeRateSegmentsRemainOneLogicalTrack() throws {
+        let origin: UInt64 = 1_000
+        let firstEnd = origin + HostTime.hostTicks(forSeconds: 1)
+        let resumedAt = firstEnd + HostTime.hostTicks(forSeconds: 0.5)
+        let manifest = RecordingManifest(
+            startedAt: Date(timeIntervalSince1970: 0),
+            reports: [
+                TrackReport(
+                    file: "system-2.wav",
+                    source: .systemAudio,
+                    segmentIndex: 1,
+                    content: .remote,
+                    sampleRate: 44_100,
+                    frameCount: 66_150,
+                    peakAmplitude: 0.4,
+                    droppedSampleCount: 0,
+                    spans: [
+                        .init(
+                            fileFrameOffset: 22_050,
+                            frameCount: 44_100,
+                            startHostTime: resumedAt)
+                    ],
+                    firstSampleHostTime: firstEnd
+                ),
+                TrackReport(
+                    file: "system.wav",
+                    source: .systemAudio,
+                    segmentIndex: 0,
+                    content: .remote,
+                    sampleRate: 48_000,
+                    frameCount: 48_000,
+                    peakAmplitude: 0.5,
+                    droppedSampleCount: 0,
+                    firstSampleHostTime: origin
+                ),
+            ]
+        )
+
+        let segments = manifest.segments(for: .systemAudio)
+        #expect(segments.map(\.file) == ["system.wav", "system-2.wav"])
+        #expect(segments.map(\.sampleRate) == [48_000, 44_100])
+        #expect(segments[1].startOffset == 1)
+        #expect(abs(try #require(segments[1].spans?.first?.startOffset) - 1.5) < 0.001)
+        #expect(segments[1].gaps?.first?.frameCount == 22_050)
+        #expect(segments[1].gaps?.first?.duration == 0.5)
+        #expect(try roundTrip(manifest) == manifest)
     }
 
     @Test("it round trips through the file it writes")

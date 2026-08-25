@@ -62,11 +62,10 @@ survive rebuilds.
 
 ## Stages
 
-**Current stage: 1.** Both tracks record and are verified on device; no ASR code exists
-yet. Stage 2 is gated on the open P0 items in
-[`docs/technical-debt.md`](docs/technical-debt.md), because it builds on the recorded
-timeline and inherits whatever that timeline gets wrong. Update this line when the stage
-changes; the stages below say what each one is, not where the work stands.
+**Current stage: 2.** Stage 1 is complete: both tracks and a controlled device-switch
+restart are verified on hardware, including a native-rate change, explicit gap and signal
+after recovery. No ASR code exists yet. The stages below say what each one is, not where
+the work stands.
 
 ### Stage 0 — skeleton
 - SwiftUI menu-bar app with a start/stop control.

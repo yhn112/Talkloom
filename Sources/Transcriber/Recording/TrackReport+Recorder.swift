@@ -11,6 +11,8 @@ extension TrackRecorder.Completion {
     var report: TrackReport {
         TrackReport(
             file: summary.url.lastPathComponent,
+            source: summary.source,
+            segmentIndex: summary.segmentIndex,
             content: summary.content,
             sampleRate: summary.sampleRate,
             frameCount: summary.frameCount,

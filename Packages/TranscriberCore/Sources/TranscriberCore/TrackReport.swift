@@ -30,6 +30,13 @@ public struct TrackReport: Sendable {
     /// describes, and a recording that can be moved is worth more than one that cannot.
     public let file: String
 
+    /// The logical track this physical master segment belongs to. `nil` only for callers
+    /// describing a legacy or recovered file whose source is unknown.
+    public let source: TrackSource?
+
+    /// Zero-based position within `source`, or `nil` when the logical source is unknown.
+    public let segmentIndex: Int?
+
     /// Who is on this track — the capture policy's answer, not a measurement.
     public let content: TrackContent
 
@@ -56,6 +63,8 @@ public struct TrackReport: Sendable {
 
     public init(
         file: String,
+        source: TrackSource? = nil,
+        segmentIndex: Int? = nil,
         content: TrackContent,
         sampleRate: Double,
         frameCount: Int,
@@ -66,6 +75,8 @@ public struct TrackReport: Sendable {
     ) {
         self.init(
             file: file,
+            source: source,
+            segmentIndex: segmentIndex,
             content: content,
             sampleRate: sampleRate,
             frameCount: frameCount,
@@ -81,6 +92,8 @@ public struct TrackReport: Sendable {
 
     public init(
         file: String,
+        source: TrackSource? = nil,
+        segmentIndex: Int? = nil,
         content: TrackContent,
         sampleRate: Double,
         frameCount: Int,
@@ -91,6 +104,8 @@ public struct TrackReport: Sendable {
         failure: String? = nil
     ) {
         self.file = file
+        self.source = source
+        self.segmentIndex = segmentIndex
         self.content = content
         self.sampleRate = sampleRate
         self.frameCount = frameCount

@@ -169,11 +169,82 @@ changes, whether or not the tap was affected.
 Watching the tap's own output covers every cause and costs nothing. With auto-start off the
 tap delivers frames continuously, silence included, so a stream that produces nothing for a
 couple of seconds has stopped. That is the signal this project reports to the recording
-controller. The current controller finalizes both tracks and shows a failure because its
-manifest cannot represent discontinuities yet. That is interim behavior, not the Stage 1
-continuity policy; D4 and D23 in `docs/technical-debt.md` own the missing span-and-gap
-representation. Appending a replacement stream without it would still be wrong because it
-would hide the gap from the timeline.
+controller. The controller restarts only that path; the other recorder continues. A
+terminal event or exhausted retry budget leaves the failed path unavailable and visible to
+the user instead of ending a still-usable session.
+
+## A replacement producer always starts a new segment
+
+Neither capture API documents callback quiescence at teardown. CoreAudio retains the
+IOBlock and its dispatch queue until `AudioDeviceDestroyIOProcID`, but the declarations for
+destroy and stop promise only to destroy the ID and stop IO; they do not promise that no
+callback is already in flight (`AudioHardware.h:1382`–`:1419`, `:1463`–`:1474`). Likewise,
+AVFAudio says a tap can be removed while its engine is running and that stopping releases
+prepared resources, but neither `removeTapOnBus:` nor `stop` documents a callback barrier
+(`AVAudioNode.h:96`–`:124`, `AVAudioEngine.h:378`–`:386`). A serial-queue barrier can drain
+work already enqueued, but cannot prove that a producer will enqueue nothing afterwards.
+
+Every replacement producer therefore owns a new `TrackInput`, ring buffer, recorder and
+native-rate WAV, even when the sample rate did not change. Any late callback remains
+isolated on the retired input and cannot corrupt the replacement segment. Files are named
+`mic.wav`, `mic-2.wav`, … and `system.wav`, `system-2.wav`, …; `source` plus
+`segmentIndex` in `session.json` group those physical masters into the two logical tracks.
+
+The retired input's last accepted sample endpoint becomes frame zero of its replacement.
+The replacement drops blocks until one carries a valid hardware host-time anchor, then
+inserts native-rate silence from that endpoint to the new anchor before writing real
+samples. The first real span independently records the new anchor and its frame offset.
+This preserves the wall-clock gap in both the WAV and the manifest, including when the new
+device reports a different native rate; appending directly would compress the meeting.
+
+System capture is not considered restored until a new active verification signal reaches
+the replacement tap. Until that succeeds, microphone echo cancellation cannot be trusted:
+if verification fails, the microphone itself starts a new segment without Voice Processing
+IO so speaker output remains available in the mixed microphone track.
+
+### Voice Processing IO engines outlive microphone segments
+
+AVAudioEngine's configuration-change notification runs on an internal dispatch queue, and
+the header explicitly forbids deallocating the engine from its handler because synchronous
+teardown can deadlock (`AVAudioEngine.h:871`–`:897`). No public remove, stop, reset or voice-
+processing toggle API documents that the same internal property-listener queue is drained.
+The header separately notes that two engine instances can be advantageous for dynamic I/O-
+mode switching (`AVAudioEngine.h:451`–`:470`).
+
+A Sony-headphone switch run reproduced the missing lifetime boundary. The tap itself
+survived the default-output change, so the harness forced its real teardown/rebuild path.
+The retired system segment was 15.4 s at peak 0.3179 with zero drops; the simultaneous
+voice-processed microphone segment was 13.3 s at peak 0.1414 with zero drops. The restarted
+system probe then caused the microphone's data-preserving fallback from voice processing to
+raw capture. Releasing the stopped VPIO engine at that transition crashed with
+`EXC_BAD_ACCESS` in `AVAudioIOUnit::IOUnitPropertyListener` on
+`com.apple.coreaudio.AUVoiceProcessingIO`, before a replacement microphone segment could
+start.
+
+The same Sony switch protocol passed after the bounded-engine fix. The output switch
+restarted the microphone naturally, while the tap-only aggregate survived and the harness
+therefore forced the system path's real rebuild. All five segments reported zero drops:
+
+| Segment | Native rate | Duration | Peak |
+| --- | ---: | ---: | ---: |
+| `mic.wav` (voice processed) | 48 kHz | 11.800 s | 0.0969 |
+| `mic-2.wav` (voice processed) | 48 kHz | 2.011 s | 0.0013 |
+| `mic-3.wav` (mixed fallback) | 16 kHz | 5.074 s | 0.0030 |
+| `system.wav` | 48 kHz | 14.432 s | 0.3179 |
+| `system-2.wav` | 48 kHz | 5.919 s | 0.3412 |
+
+The replacement system master begins with 3,013 silent frames at 48 kHz, a measured gap
+of 0.063 s, followed by non-silent speech. The system timeline began 1.309 s before the
+microphone and their final logical endpoints were 20.351 s and 20.193 s, a 0.157 s
+difference. The microphone's switch to a 16 kHz native device also confirms that a rate
+change starts a new master instead of changing the existing WAV's format.
+
+`MicrophoneCapture` therefore owns two stable engine graphs for its process-long lifetime:
+one has VPIO enabled once and never disabled, and the other has never hosted VPIO. A
+voice-processed-to-raw transition borrows the second graph without releasing or toggling
+the first. Physical segments still receive new tap closures, inputs, recorders and WAVs, so
+late sample callbacks stay isolated while AVFAudio's undocumented listener lifetime stays
+valid.
 
 ## Call sequence
 

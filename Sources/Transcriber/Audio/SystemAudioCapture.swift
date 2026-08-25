@@ -9,7 +9,7 @@ import Foundation
 /// header citations behind every constant used here are in `docs/system-audio-capture.md`.
 ///
 /// A tap produces nothing on its own: it has to be wrapped in a private aggregate device.
-actor SystemAudioCapture {
+actor SystemAudioCapture: SystemAudioCapturing {
     enum Failure: Error, LocalizedError {
         case tapCreationFailed(String)
         case tapFormatUnavailable(String)
@@ -53,12 +53,34 @@ actor SystemAudioCapture {
     private let ioQueue = DispatchQueue(
         label: "me.diskin.Transcriber.system-audio", qos: .userInitiated)
 
-    private var tap: Tap?
-    private var recorder: TrackRecorder?
+    private struct LiveSegment {
+        let run: CaptureRun
+        let tap: Tap
+        let recorder: TrackRecorder
+    }
+
+    private struct InterruptedPath {
+        let runID: UUID
+        let nextSegmentIndex: Int
+        let precedingEndHostTime: UInt64?
+    }
+
+    private var current: LiveSegment?
+    private var interrupted: InterruptedPath?
+    private var completedSegments: [TrackRecorder.Completion] = []
+    private var retiringRecorder: TrackRecorder?
+    private var preparingRecorder: TrackRecorder?
+    private var preparingTap: Tap?
+    private var preparingURL: URL?
     private var watchdogTask: Task<Void, Never>?
     private var lastObservedSampleCount = 0
     private var stalledSeconds = 0
-    private var runtimeFailureHandler: (@Sendable (String) -> Void)?
+    private var runtimeEventHandler: (@Sendable (CaptureRuntimeEvent) -> Void)?
+    private var reportedRunIDs: Set<UUID> = []
+    private var operationID = UUID()
+    private var replacementRunID: UUID?
+    private var isFinishingSession = false
+    private var finishWaiters: [CheckedContinuation<[TrackRecorder.Completion], Never>] = []
 
     /// Last resort for the tap and its aggregate device.
     ///
@@ -68,10 +90,13 @@ actor SystemAudioCapture {
     /// app, and nothing cleans it up. Dropping this actor without stopping it should not
     /// leave that behind.
     deinit {
-        if let tap {
+        if let current {
             AppLog.capture.error(
                 "the system audio tap was dropped without being stopped; tearing it down")
-            Self.destroy(tap, context: "deinit fallback")
+            Self.destroy(current.tap, context: "deinit fallback")
+        }
+        if let preparingTap {
+            Self.destroy(preparingTap, context: "deinit preparation fallback")
         }
         watchdogTask?.cancel()
     }
@@ -79,11 +104,152 @@ actor SystemAudioCapture {
     /// Starts capture into `url` and returns the sample rate the tap reported.
     @discardableResult
     func start(writingTo url: URL) async throws -> Double {
-        guard recorder == nil else { return tap?.format.mSampleRate ?? 0 }
+        if let current { return current.tap.format.mSampleRate }
+        guard interrupted == nil, retiringRecorder == nil, preparingRecorder == nil else {
+            throw CancellationError()
+        }
+        completedSegments = []
+        interrupted = nil
+        let segment = try await startSegment(
+            writingTo: url,
+            segmentIndex: 0,
+            precedingEndHostTime: nil
+        )
+        return segment.tap.format.mSampleRate
+    }
 
-        // The format has to be known before the recorder exists, and only the tap can say
-        // what it is — so the tap is built first, against a temporary handle, and the
-        // recorder is created from what it reported.
+    func begin(writingTo url: URL) async throws -> CaptureRun {
+        if let current { return current.run }
+        _ = try await start(writingTo: url)
+        guard let current else { throw CancellationError() }
+        return current.run
+    }
+
+    func observeRuntimeEvents(
+        _ handler: @escaping @Sendable (CaptureRuntimeEvent) -> Void
+    ) async {
+        runtimeEventHandler = handler
+        guard let current else { return }
+        startWatchdog(for: current.run.id)
+        await observeRecorderFailure(current.recorder, runID: current.run.id)
+    }
+
+    /// Compatibility for direct callers while the controller moves to typed events.
+    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async {
+        await observeRuntimeEvents { handler($0.message) }
+    }
+
+    func restart(
+        after event: CaptureRuntimeEvent,
+        writingTo nextSegmentURL: URL
+    ) async throws -> CaptureRestartResult {
+        guard event.retryability == .restartable else { return .stale }
+        guard replacementRunID == nil else { return .stale }
+        replacementRunID = event.runID
+        defer {
+            if replacementRunID == event.runID { replacementRunID = nil }
+        }
+        guard let context = await interrupt(runID: event.runID) else { return .stale }
+        guard !isFinishingSession, interrupted?.runID == context.runID else { return .stale }
+        let segment: LiveSegment
+        do {
+            segment = try await startSegment(
+                writingTo: nextSegmentURL,
+                segmentIndex: context.nextSegmentIndex,
+                precedingEndHostTime: context.precedingEndHostTime
+            )
+        } catch is CancellationError {
+            return .stale
+        }
+        guard current?.run == segment.run, !isFinishingSession else { return .stale }
+        interrupted = nil
+        return .restarted(segment.run)
+    }
+
+    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async {
+        guard let current else { return }
+        await current.recorder.observeFirstSample(handler)
+    }
+
+    /// Actively proves that this running tap carries output before microphone AEC can erase
+    /// that same output from the only other track.
+    func verifySignal() async throws -> Bool {
+        guard let current else { return false }
+        let observation = await current.recorder.beginSignalObservation(
+            above: SystemAudioProbe.signalThreshold)
+        do {
+            try await SystemAudioProbe.play()
+        } catch {
+            await current.recorder.cancelSignalObservation(observation)
+            throw error
+        }
+        return await current.recorder.waitForSignal(
+            observation, timeout: SystemAudioProbe.observationTimeout)
+    }
+
+    func stop() async -> TrackRecorder.Completion? {
+        await finishSession().last
+    }
+
+    func finishSession() async -> [TrackRecorder.Completion] {
+        if isFinishingSession {
+            return await withCheckedContinuation { finishWaiters.append($0) }
+        }
+        guard
+            current != nil || retiringRecorder != nil || preparingRecorder != nil
+                || !completedSegments.isEmpty
+        else { return [] }
+
+        isFinishingSession = true
+        operationID = UUID()
+        replacementRunID = nil
+        runtimeEventHandler = nil
+        cancelWatchdog()
+
+        let live = current
+        current = nil
+        if let live {
+            live.recorder.input.closeProducer()
+            Self.destroy(live.tap, context: "stopping system audio capture")
+        }
+        let retiringRecorder = self.retiringRecorder
+        self.retiringRecorder = nil
+        let preparingRecorder = self.preparingRecorder
+        let preparingTap = self.preparingTap
+        let preparingURL = self.preparingURL
+        self.preparingRecorder = nil
+        self.preparingTap = nil
+        self.preparingURL = nil
+        if let preparingTap {
+            Self.destroy(preparingTap, context: "stopping system audio preparation")
+        }
+
+        if let live { appendCompleted(await finalizedCompletion(for: live.recorder)) }
+        if let retiringRecorder {
+            appendCompleted(await finalizedCompletion(for: retiringRecorder))
+        }
+        if let preparingRecorder {
+            _ = await preparingRecorder.finish()
+            if let preparingURL { try? FileManager.default.removeItem(at: preparingURL) }
+        }
+        interrupted = nil
+
+        let completions = completedSegments
+        completedSegments = []
+        reportedRunIDs = []
+        isFinishingSession = false
+        let waiters = finishWaiters
+        finishWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters { waiter.resume(returning: completions) }
+        return completions
+    }
+
+    private func startSegment(
+        writingTo url: URL,
+        segmentIndex: Int,
+        precedingEndHostTime: UInt64?
+    ) async throws -> LiveSegment {
+        guard !isFinishingSession else { throw CancellationError() }
         let probe = try createTap()
         let sampleRate = probe.format.mSampleRate
         guard sampleRate > 0, probe.format.mChannelsPerFrame > 0 else {
@@ -99,82 +265,95 @@ actor SystemAudioCapture {
             recorder = try TrackRecorder(
                 label: "system",
                 url: url,
+                source: .systemAudio,
+                segmentIndex: segmentIndex,
                 sampleRate: sampleRate,
-                content: .remote
+                content: .remote,
+                precedingSegmentEndHostTime: precedingEndHostTime
             )
         } catch {
             Self.destroy(probe, context: "rolling back track recorder creation")
             throw error
         }
-        var running = probe
+
+        let run = CaptureRun(id: UUID(), segmentIndex: segmentIndex)
+        let operationID = UUID()
+        self.operationID = operationID
+        preparingRecorder = recorder
+        preparingTap = probe
+        preparingURL = url
+        await recorder.start()
+        guard self.operationID == operationID, !isFinishingSession,
+            preparingRecorder != nil, var running = preparingTap
+        else { throw CancellationError() }
+
         do {
             try attachAndStart(&running, feeding: recorder.input)
-            self.tap = running
         } catch {
+            preparingTap = nil
             Self.destroy(running, context: "rolling back a failed system audio start")
             _ = await recorder.finish()
+            guard self.operationID == operationID, !isFinishingSession else {
+                throw CancellationError()
+            }
+            preparingRecorder = nil
+            preparingURL = nil
             try? FileManager.default.removeItem(at: url)
             throw error
         }
 
-        await recorder.start()
-        self.recorder = recorder
+        let segment = LiveSegment(run: run, tap: running, recorder: recorder)
+        preparingRecorder = nil
+        preparingTap = nil
+        preparingURL = nil
+        current = segment
         lastObservedSampleCount = 0
         stalledSeconds = 0
+        if runtimeEventHandler != nil {
+            startWatchdog(for: run.id)
+            await observeRecorderFailure(recorder, runID: run.id)
+        }
+        guard self.operationID == operationID, current?.run == run, !isFinishingSession else {
+            throw CancellationError()
+        }
 
-        let format = probe.format
+        let format = running.format
         AppLog.capture.notice(
             "system audio tap format: \(format.mSampleRate, format: .fixed(precision: 0), privacy: .public) Hz, \(format.mChannelsPerFrame, privacy: .public) ch, \(format.mBytesPerFrame, privacy: .public) bytes/frame, \(format.mFramesPerPacket, privacy: .public) frames/packet, flags 0x\(String(format.mFormatFlags, radix: 16), privacy: .public)"
         )
-        return sampleRate
+        return segment
     }
 
-    /// Arms the watchdog and track monitoring once the controller is ready to stop the
-    /// complete session. The watchdog sees a tap that stopped delivering; only the track
-    /// itself sees a track that stopped being written.
-    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async {
-        guard let recorder else { return }
-        runtimeFailureHandler = handler
-        startWatchdog()
-        await recorder.observeFailures { [weak self] failure in
-            Task { await self?.reportRuntimeFailure(failure.localizedDescription) }
-        }
-    }
-
-    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async {
-        guard let recorder else { return }
-        await recorder.observeFirstSample(handler)
-    }
-
-    /// Actively proves that this running tap carries output before microphone AEC can erase
-    /// that same output from the only other track.
-    func verifySignal() async throws -> Bool {
-        guard let recorder else { return false }
-        let observation = await recorder.beginSignalObservation(
-            above: SystemAudioProbe.signalThreshold)
-        do {
-            try await SystemAudioProbe.play()
-        } catch {
-            await recorder.cancelSignalObservation(observation)
-            throw error
-        }
-        return await recorder.waitForSignal(
-            observation, timeout: SystemAudioProbe.observationTimeout)
-    }
-
-    /// Stops capture and closes the file.
-    func stop() async -> TrackRecorder.Completion? {
-        guard let recorder else { return nil }
-        self.recorder = nil
-        runtimeFailureHandler = nil
-
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        if let tap {
-            Self.destroy(tap, context: "stopping system audio capture")
-            self.tap = nil
+    private func interrupt(runID: UUID) async -> InterruptedPath? {
+        if let interrupted, interrupted.runID == runID { return interrupted }
+        guard !isFinishingSession, let segment = current, segment.run.id == runID else {
+            return nil
         }
 
+        cancelWatchdog()
+        current = nil
+        let operationID = UUID()
+        self.operationID = operationID
+        retiringRecorder = segment.recorder
+        segment.recorder.input.closeProducer()
+        Self.destroy(segment.tap, context: "restarting system audio capture")
+        while segment.recorder.input.hasActiveProducerWrite { await Task.yield() }
+        guard self.operationID == operationID, !isFinishingSession else { return nil }
+        let context = InterruptedPath(
+            runID: runID,
+            nextSegmentIndex: segment.run.segmentIndex + 1,
+            precedingEndHostTime: segment.recorder.input.lastSampleEndHostTime
+        )
+        interrupted = context
+        let completion = await finalizedCompletion(for: segment.recorder)
+        guard self.operationID == operationID, !isFinishingSession else { return nil }
+        retiringRecorder = nil
+        appendCompleted(completion)
+        return context
+    }
+
+    private func finalizedCompletion(for recorder: TrackRecorder) async -> TrackRecorder.Completion
+    {
         let shape = recorder.input.lastBufferListShape
         AppLog.capture.debug(
             "system audio last block: \(shape.buffers, privacy: .public) buffer(s), \(shape.channels, privacy: .public) ch, \(shape.byteCount, privacy: .public) bytes"
@@ -192,6 +371,15 @@ actor SystemAudioCapture {
                 failure: .unexpectedBufferLayout(label: "system audio", blockCount: refused)
             )
         }
+        return completion
+    }
+
+    private func appendCompleted(_ completion: TrackRecorder.Completion) {
+        guard !completedSegments.contains(where: { $0.summary.url == completion.summary.url })
+        else {
+            return
+        }
+        completedSegments.append(completion)
         let summary = completion.summary
         AppLog.capture.notice(
             "system audio track: \(summary.duration, format: .fixed(precision: 1), privacy: .public) s, peak \(summary.peakAmplitude, format: .fixed(precision: 4), privacy: .public), dropped \(summary.droppedSampleCount, privacy: .public) samples"
@@ -201,7 +389,6 @@ actor SystemAudioCapture {
                 "system audio track is silent; nothing was playing, or the Audio Recording permission is missing"
             )
         }
-        return completion
     }
 
     // MARK: - Building the tap
@@ -399,13 +586,19 @@ actor SystemAudioCapture {
     /// not a quiet moment — it is a stopped stream.
     private static let stallTolerance = 2
 
-    private func startWatchdog() {
+    private func startWatchdog(for runID: UUID) {
+        cancelWatchdog()
         watchdogTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
-                await self?.checkForStall()
+                await self?.checkForStall(runID: runID)
             }
         }
+    }
+
+    private func cancelWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
     }
 
     /// Watches the sample count rather than the default output device.
@@ -415,18 +608,20 @@ actor SystemAudioCapture {
     /// someone plugs in headphones — a gap in the recording to fix a problem that may not
     /// have happened. A tap that has stopped delivering is the thing that actually matters,
     /// it covers every cause, and nothing else reports it: the file simply goes quiet.
-    private func checkForStall() async {
-        guard let recorder, tap != nil else { return }
+    private func checkForStall(runID: UUID) async {
+        guard let current, current.run.id == runID else { return }
 
-        let refused = recorder.input.unexpectedLayoutCount
+        let refused = current.recorder.input.unexpectedLayoutCount
         if refused > 0 {
-            reportRuntimeFailure(
-                "The system audio tap delivered \(refused) unsupported buffer block(s)."
+            reportRuntimeEvent(
+                runID: runID,
+                message: "The system audio tap delivered \(refused) unsupported buffer block(s).",
+                retryability: .restartable
             )
             return
         }
 
-        let received = recorder.input.ring.totalSampleCount
+        let received = current.recorder.input.ring.totalSampleCount
         if received > lastObservedSampleCount {
             lastObservedSampleCount = received
             stalledSeconds = 0
@@ -437,17 +632,37 @@ actor SystemAudioCapture {
         guard stalledSeconds >= Self.stallTolerance else { return }
         stalledSeconds = 0
 
-        reportRuntimeFailure(
-            "The system audio tap stopped delivering samples for \(Self.stallTolerance) seconds."
+        reportRuntimeEvent(
+            runID: runID,
+            message:
+                "The system audio tap stopped delivering samples for \(Self.stallTolerance) seconds.",
+            retryability: .restartable
         )
     }
 
-    private func reportRuntimeFailure(_ message: String) {
+    private func observeRecorderFailure(_ recorder: TrackRecorder, runID: UUID) async {
+        await recorder.observeFailures { [weak self] failure in
+            Task {
+                await self?.reportRuntimeEvent(
+                    runID: runID,
+                    message: failure.localizedDescription,
+                    retryability: .terminal
+                )
+            }
+        }
+    }
+
+    private func reportRuntimeEvent(
+        runID: UUID,
+        message: String,
+        retryability: CaptureRuntimeEvent.Retryability
+    ) {
+        guard current?.run.id == runID, let runtimeEventHandler,
+            reportedRunIDs.insert(runID).inserted
+        else { return }
         AppLog.capture.error("\(message, privacy: .public)")
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        let handler = runtimeFailureHandler
-        runtimeFailureHandler = nil
-        handler?(message)
+        cancelWatchdog()
+        runtimeEventHandler(
+            CaptureRuntimeEvent(runID: runID, message: message, retryability: retryability))
     }
 }

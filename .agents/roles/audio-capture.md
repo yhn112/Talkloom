@@ -24,8 +24,8 @@ skill — read it rather than working from this list.
 Two of these are architecture, not diagnosis, so they are decided before code: never
 resample on the capture path, and the microphone and system tracks stay separate files
 (`AGENTS.md`, "Audio format and separate tracks"). When a tap stalls, report it to the
-controller and follow the Stage 1 continuity policy in `PLAN.md`; D4 and D23 in
-`docs/technical-debt.md` describe the current implementation gap. Never append a restarted
+controller and follow the Stage 1 continuity policy in `PLAN.md`. A replacement producer
+always gets a new input, recorder and native-rate master segment; never append a restarted
 path without representing its missing wall-clock interval in both the master and manifest.
 
 ## How to work

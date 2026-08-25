@@ -13,8 +13,14 @@ struct RecordingSession: Equatable, Sendable {
     /// The masters, written in the device's own format while recording. The 16 kHz mono
     /// copies ASR wants are derived from these afterwards, so a better model can later be
     /// re-run against the original audio rather than against a downsampled copy.
-    var microphoneTrackURL: URL { directory.appending(path: "mic.wav") }
-    var systemTrackURL: URL { directory.appending(path: "system.wav") }
+    var microphoneTrackURL: URL { trackURL(for: .microphone, segmentIndex: 0) }
+    var systemTrackURL: URL { trackURL(for: .systemAudio, segmentIndex: 0) }
+
+    func trackURL(for source: TrackSource, segmentIndex: Int) -> URL {
+        let stem = source == .microphone ? "mic" : "system"
+        let suffix = segmentIndex == 0 ? "" : "-\(segmentIndex + 1)"
+        return directory.appending(path: "\(stem)\(suffix).wav")
+    }
 
     /// Directory name for a session, e.g. `2026-08-24_15-30-12`.
     ///

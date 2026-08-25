@@ -98,6 +98,52 @@ extension DeviceTests {
             // over five runs.
         }
 
+        /// Regression for the in-session safety transition used when system audio can no
+        /// longer be verified. Releasing the Voice Processing IO engine as the raw engine
+        /// started reproduced an EXC_BAD_ACCESS on AVFAudio's internal property-listener
+        /// queue; both physical segments must now survive the transition.
+        @Test("voice processing can fall back to a raw segment")
+        func voiceProcessingCanFallBackToARawSegment() async throws {
+            let capture = MicrophoneCapture()
+            let voiceURL = directory.appending(path: "reconfigure-voice.wav")
+            let rawURL = directory.appending(path: "reconfigure-raw.wav")
+
+            do {
+                let voiceRun = try await capture.begin(
+                    writingTo: voiceURL,
+                    voiceProcessing: true
+                )
+                try await Task.sleep(for: .seconds(1))
+
+                let rawRun: CaptureRun
+                switch try await capture.reconfigure(
+                    run: voiceRun,
+                    writingTo: rawURL,
+                    voiceProcessing: false
+                ) {
+                case .stale:
+                    Issue.record("the live voice-processed run was treated as stale")
+                    _ = await capture.finishSession()
+                    return
+                case .restarted(let run):
+                    rawRun = run
+                }
+                try await Task.sleep(for: .seconds(1))
+
+                let completions = await capture.finishSession()
+                #expect(rawRun.segmentIndex == 1)
+                #expect(completions.count == 2)
+                #expect(completions.map(\.summary.segmentIndex) == [0, 1])
+                #expect(completions.map(\.summary.content) == [.local, .mixed])
+                #expect(completions.allSatisfy { $0.failure == nil })
+                #expect(completions.allSatisfy { $0.summary.frameCount > 0 })
+                #expect(completions.allSatisfy { $0.summary.droppedSampleCount == 0 })
+            } catch {
+                _ = await capture.finishSession()
+                throw error
+            }
+        }
+
         /// Echo cancellation has to actually cancel. A canceller that silently does nothing
         /// looks identical from the API's side, and only shows up later as every remote line
         /// appearing twice in the transcript.

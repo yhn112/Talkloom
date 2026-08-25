@@ -9,24 +9,35 @@ import TranscriberCore
 struct RecordingControllerTests {
     private actor FakeMicrophone: MicrophoneCapturing {
         let startDelay: Duration
+        let restartDelay: Duration
         let shouldFailStart: Bool
+        var restartFailuresRemaining: Int
         private(set) var beginCount = 0
         private(set) var endCount = 0
+        private(set) var restartCount = 0
 
         /// Whether echo cancellation was asked for. The controller decides this from an
         /// active system-track probe, and it decides what the microphone track contains,
         /// so it is the part worth pinning down here.
         private(set) var lastVoiceProcessing: Bool?
         private(set) var hasLiveResource = false
-        private var failureHandler: (@Sendable (String) -> Void)?
+        private var currentRun: CaptureRun?
+        private var eventHandler: (@Sendable (CaptureRuntimeEvent) -> Void)?
         private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
 
-        init(startDelay: Duration = .zero, shouldFailStart: Bool = false) {
+        init(
+            startDelay: Duration = .zero,
+            restartDelay: Duration = .zero,
+            shouldFailStart: Bool = false,
+            restartFailures: Int = 0
+        ) {
             self.startDelay = startDelay
+            self.restartDelay = restartDelay
             self.shouldFailStart = shouldFailStart
+            self.restartFailuresRemaining = restartFailures
         }
 
-        func begin(writingTo url: URL, voiceProcessing: Bool) async throws {
+        func begin(writingTo url: URL, voiceProcessing: Bool) async throws -> CaptureRun {
             beginCount += 1
             lastVoiceProcessing = voiceProcessing
             if startDelay > .zero { try await Task.sleep(for: startDelay) }
@@ -34,22 +45,76 @@ struct RecordingControllerTests {
             // Production publishes its recorder after its final suspension. Installing the
             // marker here reproduces the actor-reentrancy window a premature `end()` misses.
             hasLiveResource = true
+            let run = CaptureRun(id: UUID(), segmentIndex: 0)
+            currentRun = run
+            return run
         }
 
-        func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
-            failureHandler = handler
+        func observeRuntimeEvents(
+            _ handler: @escaping @Sendable (CaptureRuntimeEvent) -> Void
+        ) {
+            eventHandler = handler
         }
 
         func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) {
             firstSampleHandler = handler
         }
 
-        func end() -> TrackRecorder.Completion? {
+        func restart(
+            after event: CaptureRuntimeEvent,
+            writingTo nextSegmentURL: URL
+        ) async throws -> CaptureRestartResult {
+            guard let currentRun, currentRun.id == event.runID else { return .stale }
+            restartCount += 1
+            if restartDelay > .zero { try await Task.sleep(for: restartDelay) }
+            guard self.currentRun == currentRun else { return .stale }
+            if restartFailuresRemaining > 0 {
+                restartFailuresRemaining -= 1
+                throw CocoaError(.fileReadUnknown)
+            }
+            let run = CaptureRun(id: UUID(), segmentIndex: currentRun.segmentIndex + 1)
+            self.currentRun = run
+            return .restarted(run)
+        }
+
+        func reconfigure(
+            run: CaptureRun,
+            writingTo nextSegmentURL: URL,
+            voiceProcessing: Bool
+        ) async throws -> CaptureRestartResult {
+            guard currentRun == run else { return .stale }
+            restartCount += 1
+            if restartDelay > .zero { try await Task.sleep(for: restartDelay) }
+            guard currentRun == run else { return .stale }
+            if restartFailuresRemaining > 0 {
+                restartFailuresRemaining -= 1
+                throw CocoaError(.fileReadUnknown)
+            }
+            lastVoiceProcessing = voiceProcessing
+            let replacement = CaptureRun(id: UUID(), segmentIndex: run.segmentIndex + 1)
+            currentRun = replacement
+            return .restarted(replacement)
+        }
+
+        func finishSession() -> [TrackRecorder.Completion] {
             endCount += 1
-            failureHandler = nil
+            eventHandler = nil
             firstSampleHandler = nil
+            currentRun = nil
             hasLiveResource = false
-            return nil
+            return []
+        }
+
+        func fail(
+            _ message: String,
+            retryability: CaptureRuntimeEvent.Retryability = .restartable
+        ) {
+            guard let currentRun else { return }
+            eventHandler?(
+                CaptureRuntimeEvent(
+                    runID: currentRun.id,
+                    message: message,
+                    retryability: retryability))
         }
 
         func reportFirstSample(_ hostTime: UInt64) { firstSampleHandler?(hostTime) }
@@ -57,45 +122,69 @@ struct RecordingControllerTests {
 
     private actor FakeSystemAudio: SystemAudioCapturing {
         let startDelay: Duration
+        let restartDelay: Duration
         let endDelay: Duration
         let completion: TrackRecorder.Completion?
+        let restartCompletion: TrackRecorder.Completion?
         let shouldFailStart: Bool
         let verifiedSignal: Bool
+        let restartVerifiedSignal: Bool?
         let shouldFailVerification: Bool
+        var restartFailuresRemaining: Int
         private(set) var beginCount = 0
         private(set) var endCount = 0
-        private var failureHandler: (@Sendable (String) -> Void)?
-        private var retiredFailureHandler: (@Sendable (String) -> Void)?
+        private(set) var restartCount = 0
+        private(set) var verificationCount = 0
+        private var currentRun: CaptureRun?
+        private var eventHandler: (@Sendable (CaptureRuntimeEvent) -> Void)?
+        private var retiredEventHandler: (@Sendable (CaptureRuntimeEvent) -> Void)?
+        private var retiredEvent: CaptureRuntimeEvent?
         private var firstSampleHandler: (@Sendable (UInt64) -> Void)?
+        private var didStoreRestartCompletion = false
 
         init(
             startDelay: Duration = .zero,
+            restartDelay: Duration = .zero,
             endDelay: Duration = .zero,
             completion: TrackRecorder.Completion? = nil,
+            restartCompletion: TrackRecorder.Completion? = nil,
             shouldFailStart: Bool = false,
             verifiedSignal: Bool = true,
+            restartVerifiedSignal: Bool? = nil,
+            restartFailures: Int = 0,
             shouldFailVerification: Bool = false
         ) {
             self.startDelay = startDelay
+            self.restartDelay = restartDelay
             self.endDelay = endDelay
             self.completion = completion
+            self.restartCompletion = restartCompletion
             self.shouldFailStart = shouldFailStart
             self.verifiedSignal = verifiedSignal
+            self.restartVerifiedSignal = restartVerifiedSignal
+            self.restartFailuresRemaining = restartFailures
             self.shouldFailVerification = shouldFailVerification
         }
 
-        func begin(writingTo url: URL) async throws {
+        func begin(writingTo url: URL) async throws -> CaptureRun {
             beginCount += 1
             if startDelay > .zero { try await Task.sleep(for: startDelay) }
             if shouldFailStart { throw CocoaError(.fileWriteUnknown) }
+            let run = CaptureRun(id: UUID(), segmentIndex: 0)
+            currentRun = run
+            return run
         }
 
-        func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) {
-            failureHandler = handler
+        func observeRuntimeEvents(
+            _ handler: @escaping @Sendable (CaptureRuntimeEvent) -> Void
+        ) {
+            eventHandler = handler
         }
 
         func verifySignal() throws -> Bool {
             if shouldFailVerification { throw CocoaError(.fileReadUnknown) }
+            verificationCount += 1
+            if verificationCount > 1, let restartVerifiedSignal { return restartVerifiedSignal }
             return verifiedSignal
         }
 
@@ -103,17 +192,62 @@ struct RecordingControllerTests {
             firstSampleHandler = handler
         }
 
-        func end() async -> TrackRecorder.Completion? {
-            endCount += 1
-            if endDelay > .zero { try? await Task.sleep(for: endDelay) }
-            retiredFailureHandler = failureHandler
-            failureHandler = nil
-            firstSampleHandler = nil
-            return completion
+        func restart(
+            after event: CaptureRuntimeEvent,
+            writingTo nextSegmentURL: URL
+        ) async throws -> CaptureRestartResult {
+            guard let currentRun, currentRun.id == event.runID else { return .stale }
+            restartCount += 1
+            if restartCompletion != nil { didStoreRestartCompletion = true }
+            if restartDelay > .zero { try await Task.sleep(for: restartDelay) }
+            guard self.currentRun == currentRun else { return .stale }
+            if restartFailuresRemaining > 0 {
+                restartFailuresRemaining -= 1
+                throw CocoaError(.fileReadUnknown)
+            }
+            let run = CaptureRun(id: UUID(), segmentIndex: currentRun.segmentIndex + 1)
+            self.currentRun = run
+            return .restarted(run)
         }
 
-        func fail(_ message: String) { failureHandler?(message) }
-        func failRetiredSession(_ message: String) { retiredFailureHandler?(message) }
+        func finishSession() async -> [TrackRecorder.Completion] {
+            endCount += 1
+            if endDelay > .zero { try? await Task.sleep(for: endDelay) }
+            if let currentRun {
+                retiredEvent = CaptureRuntimeEvent(
+                    runID: currentRun.id,
+                    message: "retired run",
+                    retryability: .restartable)
+            }
+            retiredEventHandler = eventHandler
+            eventHandler = nil
+            firstSampleHandler = nil
+            currentRun = nil
+            return [didStoreRestartCompletion ? restartCompletion : nil, completion].compactMap {
+                $0
+            }
+        }
+
+        func fail(
+            _ message: String,
+            retryability: CaptureRuntimeEvent.Retryability = .restartable
+        ) {
+            guard let currentRun else { return }
+            eventHandler?(
+                CaptureRuntimeEvent(
+                    runID: currentRun.id,
+                    message: message,
+                    retryability: retryability))
+        }
+
+        func failRetiredSession(_ message: String) {
+            guard let retiredEvent else { return }
+            retiredEventHandler?(
+                CaptureRuntimeEvent(
+                    runID: retiredEvent.runID,
+                    message: message,
+                    retryability: .restartable))
+        }
         func reportFirstSample(_ hostTime: UInt64) { firstSampleHandler?(hostTime) }
         var isMonitoringFirstSample: Bool { firstSampleHandler != nil }
     }
@@ -127,27 +261,34 @@ struct RecordingControllerTests {
 
     private func systemCompletion(
         at url: URL,
+        segmentIndex: Int = 0,
+        sampleRate: Double = 48_000,
         frameCount: Int = 48_000,
         peakAmplitude: Float = 0.25,
+        firstSampleHostTime: UInt64 = 1_000,
+        spans: [TrackReport.Span]? = nil,
         failure: TrackRecorder.Failure? = nil
     ) -> TrackRecorder.Completion {
         TrackRecorder.Completion(
             summary: TrackRecorder.Summary(
                 label: "system",
                 url: url,
+                source: .systemAudio,
+                segmentIndex: segmentIndex,
                 content: .remote,
-                sampleRate: 48_000,
+                sampleRate: sampleRate,
                 frameCount: frameCount,
                 peakAmplitude: peakAmplitude,
                 droppedSampleCount: 0,
-                firstSampleHostTime: 1_000,
-                spans: [
-                    TrackReport.Span(
-                        fileFrameOffset: 0,
-                        frameCount: frameCount,
-                        startHostTime: 1_000
-                    )
-                ]
+                firstSampleHostTime: firstSampleHostTime,
+                spans: spans
+                    ?? [
+                        TrackReport.Span(
+                            fileFrameOffset: 0,
+                            frameCount: frameCount,
+                            startHostTime: firstSampleHostTime
+                        )
+                    ]
             ),
             failure: failure
         )
@@ -259,8 +400,8 @@ struct RecordingControllerTests {
         await controller.stop()
     }
 
-    @Test("a runtime failure stops both tracks and fails the session")
-    func runtimeFailureStopsBothTracksAndFailsTheSession() async throws {
+    @Test("a runtime failure restarts only its capture path")
+    func runtimeFailureRestartsOnlyItsCapturePath() async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let microphone = FakeMicrophone()
@@ -275,14 +416,167 @@ struct RecordingControllerTests {
         let session = try #require(controller.currentSession)
 
         await system.fail("device disappeared")
-        for _ in 0..<20 where controller.errorMessage == nil {
+        for _ in 0..<20 where (await system.restartCount) == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
 
-        #expect(controller.errorMessage == "System audio capture stopped: device disappeared")
+        #expect(controller.currentSession == session)
+        #expect(controller.errorMessage == nil)
+        #expect(await system.restartCount == 1)
+        #expect(await microphone.restartCount == 0)
+        #expect(await microphone.endCount == 0)
+        #expect(await system.endCount == 0)
+        #expect(controller.warning?.contains("interrupted and restored") == true)
+
+        await controller.stop()
+        #expect(try manifest(in: session).failure == nil)
+    }
+
+    @Test("a changed-rate restart remains one logical system track")
+    func changedRateRestartRemainsOneLogicalSystemTrack() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin: UInt64 = 1_000
+        let firstEnd = origin + HostTime.hostTicks(forSeconds: 1)
+        let resumedAt = firstEnd + HostTime.hostTicks(forSeconds: 0.5)
+        let system = FakeSystemAudio(
+            completion: systemCompletion(
+                at: root.appending(path: "system-2.wav"),
+                segmentIndex: 1,
+                sampleRate: 44_100,
+                frameCount: 66_150,
+                firstSampleHostTime: firstEnd,
+                spans: [
+                    TrackReport.Span(
+                        fileFrameOffset: 22_050,
+                        frameCount: 44_100,
+                        startHostTime: resumedAt)
+                ]
+            ),
+            restartCompletion: systemCompletion(
+                at: root.appending(path: "system.wav"),
+                frameCount: 48_000,
+                firstSampleHostTime: origin)
+        )
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: FakeMicrophone(),
+            systemAudio: system
+        )
+        await controller.start()
+        let session = try #require(controller.currentSession)
+
+        await system.fail("sample rate changed")
+        for _ in 0..<50 where controller.warning?.contains("restored") != true {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await controller.stop()
+
+        let segments = try manifest(in: session).segments(for: .systemAudio)
+        #expect(segments.map(\.file) == ["system.wav", "system-2.wav"])
+        #expect(segments.map(\.segmentIndex) == [0, 1])
+        #expect(segments.map(\.sampleRate) == [48_000, 44_100])
+        #expect(segments[1].startOffset == 1)
+        let gap = try #require(segments[1].gaps?.first)
+        #expect(gap.fileFrameOffset == 0)
+        #expect(gap.frameCount == 22_050)
+        #expect(gap.duration == 0.5)
+        #expect(segments[1].spans?.first?.startOffset == 1.5)
+    }
+
+    @Test("a failed restart probe disables microphone echo cancellation")
+    func failedRestartProbeDisablesMicrophoneEchoCancellation() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let system = FakeSystemAudio(restartVerifiedSignal: false)
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+        await controller.start()
+
+        await system.fail("device disappeared")
+        for _ in 0..<50 where await microphone.lastVoiceProcessing != false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(controller.isRecording)
+        #expect(controller.errorMessage == nil)
+        #expect(await microphone.restartCount == 1)
+        #expect(await microphone.lastVoiceProcessing == false)
+        #expect(controller.warning?.contains("verification signal") == true)
+        #expect(controller.warning?.contains("without echo cancellation") == true)
+        await controller.stop()
+    }
+
+    @Test("restart exhaustion degrades one path and preserves remote audio")
+    func restartExhaustionDegradesOnePathAndPreservesRemoteAudio() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let system = FakeSystemAudio(restartFailures: 3)
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+        await controller.start()
+
+        await system.fail("device disappeared")
+        for _ in 0..<50 where (await microphone.restartCount) == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(controller.isRecording)
+        #expect(controller.errorMessage == nil)
+        #expect(await system.restartCount == 3)
+        #expect(await microphone.restartCount == 1)
+        #expect(await microphone.lastVoiceProcessing == false)
+        guard case .active(let active) = controller.state else {
+            Issue.record("the degraded session was no longer active")
+            return
+        }
+        guard case .unavailable = active.systemAudio else {
+            Issue.record("restart exhaustion was not visible in the path state")
+            return
+        }
+        guard case .recording = active.microphone else {
+            Issue.record("the unaffected microphone path was not recording")
+            return
+        }
+        #expect(controller.warning?.contains("could not be restored") == true)
+        #expect(controller.warning?.contains("without echo cancellation") == true)
+        await controller.stop()
+    }
+
+    @Test("stop during a suspended restart cannot resurrect capture")
+    func stopDuringSuspendedRestartCannotResurrectCapture() async throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let microphone = FakeMicrophone()
+        let system = FakeSystemAudio(restartDelay: .milliseconds(100))
+        let controller = RecordingController(
+            permissions: PermissionManager(microphone: .granted),
+            sessionRoot: root,
+            microphone: microphone,
+            systemAudio: system
+        )
+        await controller.start()
+
+        await system.fail("device disappeared")
+        while (await system.restartCount) == 0 { await Task.yield() }
+        await controller.stop()
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(!controller.isRecording)
+        #expect(controller.currentSession == nil)
         #expect(await microphone.endCount == 1)
         #expect(await system.endCount == 1)
-        #expect(try manifest(in: session).failure == controller.errorMessage)
     }
 
     @Test("a delayed runtime failure cannot stop the next session")
@@ -452,7 +746,7 @@ struct RecordingControllerTests {
             Issue.record("the failed recording had no unified failure state")
             return
         }
-        #expect(failureState.recording?.systemAudio?.frameCount == 24_000)
+        #expect(failureState.recording?.systemAudio.last?.frameCount == 24_000)
         #expect(failureState.message == controller.errorMessage)
         let written = try manifest(in: session)
         #expect(written.failure == controller.errorMessage)
@@ -545,7 +839,10 @@ struct RecordingControllerTests {
 
         #expect(active.session == session)
         #expect(active.phase == .recording)
-        #expect(active.microphone == .recording)
+        guard case .recording = active.microphone else {
+            Issue.record("the microphone path was not recording")
+            return
+        }
         guard case .unavailable(let systemFailure) = active.systemAudio else {
             Issue.record("the failed system path was not represented as unavailable")
             return

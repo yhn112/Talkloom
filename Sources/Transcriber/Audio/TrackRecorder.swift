@@ -34,6 +34,8 @@ actor TrackRecorder {
     struct Summary: Sendable {
         let label: String
         let url: URL
+        let source: TrackSource
+        let segmentIndex: Int
 
         /// Who is on this track. Decided by the capture path that created the recorder,
         /// since it is the only place that knows whether echo cancellation was applied.
@@ -76,6 +78,8 @@ actor TrackRecorder {
 
     let label: String
     let url: URL
+    let source: TrackSource
+    let segmentIndex: Int
     let content: TrackContent
     let sampleRate: Double
 
@@ -99,6 +103,9 @@ actor TrackRecorder {
     private var nextBoundary: TimelineBoundary?
     private var openSpan: OpenSpan?
     private var completedSpans: [TrackReport.Span] = []
+    private var isFinishing = false
+    private var finishedCompletion: Completion?
+    private var finishWaiters: [CheckedContinuation<Completion, Never>] = []
 
     private struct OpenSpan {
         let sourceFrameOffset: Int
@@ -145,17 +152,28 @@ actor TrackRecorder {
     init(
         label: String,
         url: URL,
+        source: TrackSource,
+        segmentIndex: Int = 0,
         sampleRate: Double,
         content: TrackContent,
+        precedingSegmentEndHostTime: UInt64? = nil,
         writer suppliedWriter: (any PCMWriting)? = nil
     ) throws {
-        guard sampleRate > 0 else { throw Failure.unsupportedSourceFormat(sampleRate: sampleRate) }
+        guard sampleRate.isFinite, sampleRate > 0,
+            sampleRate <= Double(Int.max) / Self.ringHeadroom
+        else { throw Failure.unsupportedSourceFormat(sampleRate: sampleRate) }
 
         self.label = label
         self.url = url
+        self.source = source
+        self.segmentIndex = segmentIndex
         self.content = content
         self.sampleRate = sampleRate
-        self.input = TrackInput(ringCapacity: Int(sampleRate * Self.ringHeadroom))
+        self.input = TrackInput(
+            ringCapacity: Int(sampleRate * Self.ringHeadroom),
+            sampleRate: sampleRate,
+            precedingSegmentEndHostTime: precedingSegmentEndHostTime
+        )
         self.floatScratch = [Float](repeating: 0, count: Self.drainChunkFrames)
         self.intScratch = [Int16](repeating: 0, count: Self.drainChunkFrames)
         self.silenceScratch = [Int16](repeating: 0, count: Self.drainChunkFrames)
@@ -245,6 +263,15 @@ actor TrackRecorder {
     /// The caller must have stopped the producer first: anything written after this point
     /// stays in the ring buffer and never reaches disk.
     func finish() async -> Completion {
+        if let finishedCompletion { return finishedCompletion }
+        if isFinishing {
+            return await withCheckedContinuation { finishWaiters.append($0) }
+        }
+        isFinishing = true
+
+        input.closeProducer()
+        while input.hasActiveProducerWrite { await Task.yield() }
+
         if let drainTask {
             drainTask.cancel()
             await drainTask.value
@@ -269,10 +296,12 @@ actor TrackRecorder {
             )
         }
 
-        return Completion(
+        let completion = Completion(
             summary: Summary(
                 label: label,
                 url: url,
+                source: source,
+                segmentIndex: segmentIndex,
                 content: content,
                 sampleRate: sampleRate,
                 frameCount: writer.frameCount,
@@ -283,6 +312,12 @@ actor TrackRecorder {
             ),
             failure: firstFailure
         )
+        finishedCompletion = completion
+        isFinishing = false
+        let waiters = finishWaiters
+        finishWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters { waiter.resume(returning: completion) }
+        return completion
     }
 
     private func drain() {

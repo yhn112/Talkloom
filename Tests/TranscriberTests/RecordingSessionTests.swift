@@ -53,6 +53,12 @@ struct RecordingSessionTests {
         #expect(session.microphoneTrackURL != session.systemTrackURL)
         #expect(session.microphoneTrackURL.lastPathComponent == "mic.wav")
         #expect(session.systemTrackURL.lastPathComponent == "system.wav")
+        #expect(
+            session.trackURL(for: .microphone, segmentIndex: 1).lastPathComponent
+                == "mic-2.wav")
+        #expect(
+            session.trackURL(for: .systemAudio, segmentIndex: 2).lastPathComponent
+                == "system-3.wav")
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

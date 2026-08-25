@@ -12,18 +12,6 @@ reproduced failure, a violated invariant, or a path that loses user data.
 Resolved items are deleted rather than archived. Git holds that history better, and a
 list of finished work buries the open items beside it. Identifiers are never reused.
 
-## P0 — a truthful timeline
-
-### D23 — a capture-path restart must preserve wall-clock time
-`open · P0 · confirmed fact` — Capture currently stops and finalizes the whole session when
-either path dies, which violates the Stage 1 continuity requirement in `PLAN.md`. A simple
-append after restart is not acceptable because it compresses the timeline; the gap duration
-must be derived from the old and new spans' host-time anchors and recorded in the manifest.
-**Exit:** the manifest represents anchored spans and gaps; restart inserts the corresponding
-native-rate silent frames without stopping the session; retry exhaustion is visible to the
-user; and real-device tests switch the output device and verify both track durations,
-offsets, gap length, and post-restart signal.
-
 ## Simplification
 
 ### D5 — capture `start()` returns values nobody consumes

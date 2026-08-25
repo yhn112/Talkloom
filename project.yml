@@ -120,3 +120,19 @@ schemes:
         - TranscriberTests
       environmentVariables:
         TRANSCRIBER_DEVICE_TESTS: "1"
+
+  # The capture-restart test includes a timed manual output-device switch. Keep it out of
+  # ordinary device runs so a person is never surprised by an interactive hardware test.
+  TranscriberDeviceSwitchTests:
+    build:
+      targets:
+        Transcriber: all
+        TranscriberTests: [test]
+    test:
+      config: Debug
+      targets:
+        - TranscriberTests
+      environmentVariables:
+        TRANSCRIBER_DEVICE_TESTS: "1"
+        TRANSCRIBER_DEVICE_SWITCH_TEST: "1"
+        TRANSCRIBER_DEVICE_SWITCH_ROOT: "/tmp/TranscriberDeviceSwitchRecording"

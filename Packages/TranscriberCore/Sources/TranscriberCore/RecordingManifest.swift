@@ -61,6 +61,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         }
 
         public let file: String
+        public let source: TrackSource?
+        public let segmentIndex: Int?
         public let sampleRate: Double
         public let frameCount: Int
 
@@ -122,6 +124,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
 
         private enum CodingKeys: String, CodingKey {
             case file
+            case source
+            case segmentIndex
             case sampleRate
             case frameCount
             case peakAmplitude
@@ -134,6 +138,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
 
         fileprivate init(
             file: String,
+            source: TrackSource?,
+            segmentIndex: Int?,
             sampleRate: Double,
             frameCount: Int,
             peakAmplitude: Float?,
@@ -144,6 +150,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
             content: TrackContent?
         ) {
             self.file = file
+            self.source = source
+            self.segmentIndex = segmentIndex
             self.sampleRate = sampleRate
             self.frameCount = frameCount
             self.peakAmplitude = peakAmplitude
@@ -157,6 +165,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             file = try container.decode(String.self, forKey: .file)
+            source = try container.decodeIfPresent(TrackSource.self, forKey: .source)
+            segmentIndex = try container.decodeIfPresent(Int.self, forKey: .segmentIndex)
             sampleRate = try container.decode(Double.self, forKey: .sampleRate)
             frameCount = try container.decode(Int.self, forKey: .frameCount)
             peakAmplitude = try container.decodeIfPresent(Float.self, forKey: .peakAmplitude)
@@ -183,6 +193,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         public func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(file, forKey: .file)
+            try container.encodeIfPresent(source, forKey: .source)
+            try container.encodeIfPresent(segmentIndex, forKey: .segmentIndex)
             try container.encode(sampleRate, forKey: .sampleRate)
             try container.encode(frameCount, forKey: .frameCount)
             try container.encodeIfPresent(peakAmplitude, forKey: .peakAmplitude)
@@ -204,6 +216,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         ) -> Track {
             Track(
                 file: file,
+                source: nil,
+                segmentIndex: nil,
                 sampleRate: sampleRate,
                 frameCount: frameCount,
                 peakAmplitude: nil,
@@ -246,6 +260,13 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     public let warning: String?
 
     public static let fileName = "session.json"
+
+    /// Physical master segments in their logical-track order.
+    public func segments(for source: TrackSource) -> [Track] {
+        tracks
+            .filter { $0.source == source }
+            .sorted { ($0.segmentIndex ?? .max) < ($1.segmentIndex ?? .max) }
+    }
 
     private init(
         startedAt: Date,
@@ -342,6 +363,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
             }
             return Track(
                 file: report.file,
+                source: report.source,
+                segmentIndex: report.segmentIndex,
                 sampleRate: report.sampleRate,
                 frameCount: report.frameCount,
                 peakAmplitude: report.peakAmplitude,

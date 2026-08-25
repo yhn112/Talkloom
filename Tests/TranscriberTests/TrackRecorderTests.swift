@@ -75,6 +75,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "mic",
             url: url,
+            source: .microphone,
             sampleRate: sourceRate,
             content: .local
         )
@@ -109,7 +110,8 @@ final class TrackRecorderTests {
     func aSilentSourceIsReportedAsSilent() async throws {
         let url = directory.appending(path: "silence.wav")
         let recorder = try TrackRecorder(
-            label: "system", url: url, sampleRate: 48_000, content: .remote)
+            label: "system", url: url, source: .systemAudio, sampleRate: 48_000,
+            content: .remote)
 
         await recorder.start()
         let silence = [Float](repeating: 0, count: 48_000)
@@ -129,7 +131,7 @@ final class TrackRecorderTests {
     func fullScaleSamplesDoNotWrap() async throws {
         let url = directory.appending(path: "clipping.wav")
         let recorder = try TrackRecorder(
-            label: "mic", url: url, sampleRate: 16_000, content: .local)
+            label: "mic", url: url, source: .microphone, sampleRate: 16_000, content: .local)
         let samples: [Float] = [1.0, -1.0, 2.0, -2.0, 0.999_99]
 
         await recorder.start()
@@ -154,6 +156,7 @@ final class TrackRecorderTests {
             _ = try TrackRecorder(
                 label: "mic",
                 url: directory.appending(path: "bad.wav"),
+                source: .microphone,
                 sampleRate: 0,
                 content: .local
             )
@@ -165,6 +168,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "mic",
             url: directory.appending(path: "failed.wav"),
+            source: .microphone,
             sampleRate: 48_000,
             content: .local,
             writer: FailingWriter(.append)
@@ -187,6 +191,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: directory.appending(path: "failed.wav"),
+            source: .systemAudio,
             sampleRate: 48_000,
             content: .remote,
             writer: FailingWriter(.finish)
@@ -218,6 +223,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: directory.appending(path: "timestamp.wav"),
+            source: .systemAudio,
             sampleRate: 48_000,
             content: .remote
         )
@@ -244,6 +250,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: directory.appending(path: "signal.wav"),
+            source: .systemAudio,
             sampleRate: 48_000,
             content: .remote
         )
@@ -274,6 +281,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "mic",
             url: directory.appending(path: "reported.wav"),
+            source: .microphone,
             sampleRate: 48_000,
             content: .local,
             writer: FailingWriter(.append)
@@ -299,6 +307,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: url,
+            source: .systemAudio,
             sampleRate: 8_000,
             content: .remote
         )
@@ -362,6 +371,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: directory.appending(path: "multiple-gaps.wav"),
+            source: .systemAudio,
             sampleRate: 100,
             content: .remote
         )
@@ -422,6 +432,7 @@ final class TrackRecorderTests {
         let recorder = try TrackRecorder(
             label: "system",
             url: directory.appending(path: "initial-gap.wav"),
+            source: .systemAudio,
             sampleRate: 100,
             content: .remote
         )
@@ -454,6 +465,124 @@ final class TrackRecorderTests {
                     startHostTime: origin + HostTime.hostTicks(forSeconds: 6)
                 )
             ])
+    }
+
+    @Test("a replacement segment writes the restart gap before post-gap signal")
+    func replacementSegmentWritesLeadingRestartSilence() async throws {
+        let url = directory.appending(path: "restart-gap.wav")
+        let sampleRate = 100.0
+        let precedingEnd = HostTime.hostTicks(forSeconds: 10)
+        let resumedAt = precedingEnd + HostTime.hostTicks(forSeconds: 0.25)
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: url,
+            source: .systemAudio,
+            segmentIndex: 1,
+            sampleRate: sampleRate,
+            content: .remote,
+            precedingSegmentEndHostTime: precedingEnd
+        )
+        let signal = [Float](repeating: -0.5, count: 10)
+
+        signal.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: resumedAt
+                ))
+        }
+        let completion = await recorder.finish()
+
+        #expect(completion.failure == nil)
+        #expect(completion.summary.source == .systemAudio)
+        #expect(completion.summary.segmentIndex == 1)
+        #expect(completion.summary.firstSampleHostTime == precedingEnd)
+        #expect(completion.summary.frameCount == 35)
+        #expect(
+            completion.summary.spans == [
+                .init(fileFrameOffset: 25, frameCount: 10, startHostTime: resumedAt)
+            ])
+
+        let data = try Data(contentsOf: url)
+        let written = data.dropFirst(44).withUnsafeBytes { raw in
+            (0..<35).map {
+                Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self))
+            }
+        }
+        #expect(written[..<25].allSatisfy { $0 == 0 })
+        #expect(written[25...].allSatisfy { $0 < 0 })
+    }
+
+    @Test("a replacement drops an unanchored first block until an anchor arrives")
+    func replacementWaitsForAValidFirstAnchor() async throws {
+        let precedingEnd = HostTime.hostTicks(forSeconds: 20)
+        let resumedAt = precedingEnd + HostTime.hostTicks(forSeconds: 0.25)
+        let recorder = try TrackRecorder(
+            label: "mic",
+            url: directory.appending(path: "restart-anchor.wav"),
+            source: .microphone,
+            segmentIndex: 2,
+            sampleRate: 100,
+            content: .mixed,
+            precedingSegmentEndHostTime: precedingEnd
+        )
+        let unanchored = [Float](repeating: 0.5, count: 10)
+        let anchored = [Float](repeating: 0.25, count: 4)
+
+        unanchored.withUnsafeBufferPointer {
+            #expect(
+                !recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: nil
+                ))
+        }
+        #expect(recorder.input.firstSampleHostTime == nil)
+        #expect(!recorder.input.hasCompleteTimeline)
+        anchored.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: resumedAt
+                ))
+        }
+
+        let completion = await recorder.finish()
+
+        #expect(completion.failure == nil)
+        #expect(completion.summary.droppedSampleCount == 10)
+        #expect(completion.summary.frameCount == 29)
+        #expect(completion.summary.firstSampleHostTime == precedingEnd)
+        #expect(
+            completion.summary.spans == [
+                .init(fileFrameOffset: 25, frameCount: 4, startHostTime: resumedAt)
+            ])
+    }
+
+    @Test("restart gap arithmetic uses the replacement native rate")
+    func restartGapUsesChangedNativeRate() async throws {
+        let precedingEnd = HostTime.hostTicks(forSeconds: 30)
+        let resumedAt = precedingEnd + HostTime.hostTicks(forSeconds: 0.25)
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "changed-rate-gap.wav"),
+            source: .systemAudio,
+            segmentIndex: 3,
+            sampleRate: 44_100,
+            content: .remote,
+            precedingSegmentEndHostTime: precedingEnd
+        )
+        let signal = [Float](repeating: 0.5, count: 4)
+
+        signal.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: resumedAt
+                ))
+        }
+        let completion = await recorder.finish()
+
+        #expect(completion.failure == nil)
+        #expect(completion.summary.sampleRate == 44_100)
+        #expect(completion.summary.frameCount == 11_029)
+        #expect(completion.summary.spans?.first?.fileFrameOffset == 11_025)
+        #expect(completion.summary.spans?.first?.frameCount == 4)
     }
 
     /// The producer's downmix. Whatever the device hands over, one averaged channel comes

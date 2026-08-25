@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Synchronization
+import TranscriberCore
 
 /// The producer's end of one recorded track — everything an audio callback is allowed to
 /// touch, and nothing else.
@@ -21,14 +22,22 @@ final class TrackInput: @unchecked Sendable {
     private let scratch: UnsafeMutablePointer<Float>
     private let scratchCapacity: Int
     private let boundaries: TimelineBoundaryRing
+    private let sampleRate: Double
+    private let hostTicksPerSecond: Double
+    private let precedingSegmentEndHostTime: UInt64?
 
     /// Producer-only state. The callback is the single writer required by the SPSC rings,
     /// so these values need no synchronization and must never be touched by the consumer.
     private var needsBoundary = true
     private var pendingDroppedFrameCount = 0
+    private var derivesInitialSilenceFromAnchor: Bool
+    private let acceptsWrites = Atomic<Bool>(true)
+    private let activeWriteCount = Atomic<Int>(0)
+    private let terminalDropCount = Atomic<Int>(0)
 
     /// The recorder reads these from its actor while the callback may still be running.
     private let didObserveTimeline = Atomic<Bool>(false)
+    private let didAcceptSamples = Atomic<Bool>(false)
     private let timelineIsComplete = Atomic<Bool>(true)
 
     /// Mach host time represented by frame zero of the master, or 0 if none has arrived.
@@ -38,6 +47,10 @@ final class TrackInput: @unchecked Sendable {
     /// is one clock for the whole machine — so the microphone and the system tap can be
     /// lined up against each other exactly, however far apart they happened to start.
     private let firstHostTime = Atomic<UInt64>(0)
+
+    /// End of the last callback block on the machine clock. The capture owner reads this
+    /// only after stopping this producer, then gives it to the next physical segment.
+    private let lastEndHostTime = Atomic<UInt64>(0)
 
     /// Shape of the most recent block — buffer count, channels in the first buffer, and its
     /// size — kept for diagnosing a track whose length does not match the wall clock.
@@ -50,15 +63,29 @@ final class TrackInput: @unchecked Sendable {
     ///   - ringCapacity: samples of headroom for the consumer, at the *source* sample rate.
     ///   - maximumFrameCount: largest block a callback may hand over. A larger block is
     ///     dropped rather than truncated, so size it generously.
-    init(ringCapacity: Int, maximumFrameCount: Int = 16_384) {
+    init(
+        ringCapacity: Int,
+        sampleRate: Double = 48_000,
+        precedingSegmentEndHostTime: UInt64? = nil,
+        maximumFrameCount: Int = 16_384
+    ) {
+        precondition(sampleRate > 0 && sampleRate.isFinite)
         ring = AudioRingBuffer(capacity: ringCapacity)
         // One boundary needs at least one accepted sample before another can follow. Giving
         // the sparse side ring the sample ring's capacity therefore makes metadata capacity
         // at least as large as the number of unresolved boundaries it can accompany.
         boundaries = TimelineBoundaryRing(capacity: ring.capacity)
+        self.sampleRate = sampleRate
+        self.hostTicksPerSecond = Double(HostTime.hostTicks(forSeconds: 1))
+        self.precedingSegmentEndHostTime = precedingSegmentEndHostTime
+        self.derivesInitialSilenceFromAnchor = precedingSegmentEndHostTime != nil
         scratchCapacity = maximumFrameCount
         scratch = .allocate(capacity: maximumFrameCount)
         scratch.initialize(repeating: 0, count: maximumFrameCount)
+        if let precedingSegmentEndHostTime {
+            firstHostTime.store(precedingSegmentEndHostTime, ordering: .relaxed)
+            lastEndHostTime.store(precedingSegmentEndHostTime, ordering: .relaxed)
+        }
     }
 
     deinit {
@@ -77,8 +104,16 @@ final class TrackInput: @unchecked Sendable {
 
     /// Hardware time represented by frame zero, or `nil` if the timeline is unknown.
     var firstSampleHostTime: UInt64? {
-        guard hasCompleteTimeline else { return nil }
+        guard hasCompleteTimeline, didAcceptSamples.load(ordering: .relaxed) else { return nil }
         let value = firstHostTime.load(ordering: .relaxed)
+        return value == 0 ? nil : value
+    }
+
+    /// Complete end anchor for handing this logical track to a replacement producer.
+    /// The producer must already be stopped before this value is consumed.
+    var lastSampleEndHostTime: UInt64? {
+        guard timelineIsComplete.load(ordering: .acquiring) else { return nil }
+        let value = lastEndHostTime.load(ordering: .acquiring)
         return value == 0 ? nil : value
     }
 
@@ -87,6 +122,8 @@ final class TrackInput: @unchecked Sendable {
     var hasCompleteTimeline: Bool {
         didObserveTimeline.load(ordering: .relaxed)
             && timelineIsComplete.load(ordering: .relaxed)
+            && (precedingSegmentEndHostTime == nil
+                || didAcceptSamples.load(ordering: .relaxed))
     }
 
     /// Consumer-side boundary read. The recorder first acquires the audio write cursor, then
@@ -95,7 +132,22 @@ final class TrackInput: @unchecked Sendable {
 
     /// Any final rejected blocks after the last accepted span. The producer must already be
     /// stopped before the recorder asks for this value.
-    func terminalDroppedFrameCount() -> Int { pendingDroppedFrameCount }
+    func terminalDroppedFrameCount() -> Int {
+        terminalDropCount.load(ordering: .acquiring)
+    }
+
+    /// Closes the callback handoff before finalization. A callback that already entered is
+    /// counted until its bounded copy completes; later callbacks are refused.
+    func closeProducer() {
+        // These gate operations are sequentially consistent across both atomics. If a
+        // callback increments after this store, its second gate read must refuse the write;
+        // if it increments before this store, the consumer must observe the active count.
+        acceptsWrites.store(false, ordering: .sequentiallyConsistent)
+    }
+
+    var hasActiveProducerWrite: Bool {
+        activeWriteCount.load(ordering: .sequentiallyConsistent) != 0
+    }
 
     /// Samples the producer had to throw away, either because the consumer fell behind or
     /// because a block was larger than the scratch buffer.
@@ -104,6 +156,8 @@ final class TrackInput: @unchecked Sendable {
     /// Accepts a block from an `AVAudioNodeTapBlock`.
     @discardableResult
     func write(_ buffer: AVAudioPCMBuffer, atHostTime hostTime: UInt64? = nil) -> Bool {
+        guard beginWrite() else { return false }
+        defer { endWrite() }
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0, let channels = buffer.floatChannelData else { return true }
 
@@ -139,6 +193,8 @@ final class TrackInput: @unchecked Sendable {
         _ bufferList: UnsafePointer<AudioBufferList>,
         atHostTime hostTime: UInt64? = nil
     ) -> Bool {
+        guard beginWrite() else { return false }
+        defer { endWrite() }
         let buffers = UnsafeMutableAudioBufferListPointer(
             UnsafeMutablePointer(mutating: bufferList))
         guard let first = buffers.first else { return true }
@@ -171,7 +227,9 @@ final class TrackInput: @unchecked Sendable {
         count: Int,
         atHostTime hostTime: UInt64?
     ) -> Bool {
-        writeMono(samples, frameCount: count, hostTime: hostTime)
+        guard beginWrite() else { return false }
+        defer { endWrite() }
+        return writeMono(samples, frameCount: count, hostTime: hostTime)
     }
 
     private func write(
@@ -239,6 +297,14 @@ final class TrackInput: @unchecked Sendable {
         guard frameCount > 0 else { return true }
         didObserveTimeline.store(true, ordering: .relaxed)
         let validHostTime = hostTime.flatMap { $0 == 0 ? nil : $0 }
+
+        // A replacement segment cannot place samples until its first hardware anchor says
+        // how much wall-clock time passed since the preceding physical segment. Refuse an
+        // unanchored opening block; a later valid anchor accounts for the whole interval.
+        if derivesInitialSilenceFromAnchor, validHostTime == nil {
+            ring.recordDrop(sampleCount: frameCount)
+            return false
+        }
         if validHostTime == nil { timelineIsComplete.store(false, ordering: .relaxed) }
 
         guard ring.canWrite(sampleCount: frameCount) else {
@@ -251,11 +317,28 @@ final class TrackInput: @unchecked Sendable {
         }
 
         if needsBoundary {
+            let leadingSilence: Int
+            if derivesInitialSilenceFromAnchor,
+                let precedingSegmentEndHostTime,
+                let validHostTime,
+                let frames = nativeFrameCount(
+                    from: precedingSegmentEndHostTime,
+                    to: validHostTime
+                )
+            {
+                leadingSilence = frames
+            } else if derivesInitialSilenceFromAnchor {
+                ring.recordDrop(sampleCount: frameCount)
+                timelineIsComplete.store(false, ordering: .relaxed)
+                return false
+            } else {
+                leadingSilence = pendingDroppedFrameCount
+            }
             boundaries.write(
                 TimelineBoundary(
                     sourceFrameOffset: ring.totalSampleCount,
                     startHostTime: validHostTime ?? 0,
-                    silentFrameCount: pendingDroppedFrameCount
+                    silentFrameCount: leadingSilence
                 ))
         }
 
@@ -269,17 +352,27 @@ final class TrackInput: @unchecked Sendable {
         }
         needsBoundary = false
         pendingDroppedFrameCount = 0
+        terminalDropCount.store(0, ordering: .releasing)
+        derivesInitialSilenceFromAnchor = false
+        didAcceptSamples.store(true, ordering: .relaxed)
+        noteEndpoint(hostTime: validHostTime, frameCount: frameCount)
         return true
     }
 
     private func recordDrop(frameCount: Int, hostTime: UInt64?) {
         didObserveTimeline.store(true, ordering: .relaxed)
-        if hostTime == nil { timelineIsComplete.store(false, ordering: .relaxed) }
-        if let hostTime, timelineIsComplete.load(ordering: .relaxed) {
+        let validHostTime = hostTime.flatMap { $0 == 0 ? nil : $0 }
+        if validHostTime == nil { timelineIsComplete.store(false, ordering: .relaxed) }
+        if let validHostTime, timelineIsComplete.load(ordering: .relaxed) {
             _ = firstHostTime.compareExchange(
-                expected: 0, desired: hostTime, ordering: .relaxed)
+                expected: 0, desired: validHostTime, ordering: .relaxed)
         }
         ring.recordDrop(sampleCount: frameCount)
+        if derivesInitialSilenceFromAnchor {
+            needsBoundary = true
+            return
+        }
+        noteEndpoint(hostTime: validHostTime, frameCount: frameCount)
         let (total, overflow) = pendingDroppedFrameCount.addingReportingOverflow(frameCount)
         if overflow {
             pendingDroppedFrameCount = Int.max
@@ -287,6 +380,52 @@ final class TrackInput: @unchecked Sendable {
         } else {
             pendingDroppedFrameCount = total
         }
+        terminalDropCount.store(pendingDroppedFrameCount, ordering: .releasing)
         needsBoundary = true
+    }
+
+    /// Converts one local host-time interval to this segment's native frames. All floating
+    /// point setup happened in `init`; the callback does only bounded arithmetic and stores.
+    private func nativeFrameCount(from start: UInt64, to end: UInt64) -> Int? {
+        guard end >= start else { return nil }
+        let frames = (Double(end - start) * sampleRate / hostTicksPerSecond).rounded()
+        guard frames.isFinite, let frameCount = Int(exactly: frames), frameCount >= 0 else {
+            return nil
+        }
+        return frameCount
+    }
+
+    private func noteEndpoint(hostTime: UInt64?, frameCount: Int) {
+        guard let hostTime else { return }
+        let duration = (Double(frameCount) * hostTicksPerSecond / sampleRate).rounded()
+        guard duration.isFinite, let durationTicks = UInt64(exactly: duration) else {
+            timelineIsComplete.store(false, ordering: .relaxed)
+            return
+        }
+        let (end, overflow) = hostTime.addingReportingOverflow(durationTicks)
+        guard !overflow else {
+            timelineIsComplete.store(false, ordering: .relaxed)
+            return
+        }
+        let previous = lastEndHostTime.load(ordering: .relaxed)
+        guard previous == 0 || end >= previous else {
+            timelineIsComplete.store(false, ordering: .relaxed)
+            return
+        }
+        lastEndHostTime.store(end, ordering: .releasing)
+    }
+
+    private func beginWrite() -> Bool {
+        guard acceptsWrites.load(ordering: .sequentiallyConsistent) else { return false }
+        _ = activeWriteCount.wrappingAdd(1, ordering: .sequentiallyConsistent)
+        guard acceptsWrites.load(ordering: .sequentiallyConsistent) else {
+            _ = activeWriteCount.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+            return false
+        }
+        return true
+    }
+
+    private func endWrite() {
+        _ = activeWriteCount.wrappingSubtract(1, ordering: .sequentiallyConsistent)
     }
 }

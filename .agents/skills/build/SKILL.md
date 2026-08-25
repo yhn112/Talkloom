@@ -151,6 +151,18 @@ A separate scheme rather than an environment variable on the command line: `xcod
 does not forward the shell's environment to the test host, so `TRANSCRIBER_DEVICE_TESTS`
 has to come from the scheme itself.
 
+The output-device restart check is interactive and has a stronger cleanup requirement: a
+test-host crash cannot run Swift `defer` blocks. Run it only after the user agrees to the
+spoken switch protocol, through its parent-process harness:
+
+```bash
+scripts/device-switch-test.sh
+```
+
+The harness selects exactly one test and removes its recording, helper processes, probe
+files, log and result bundle on success, assertion failure, signal, or test-host crash. Read
+the raw measurements while it runs; they are deliberately not retained with private audio.
+
 ## When it doesn't work
 
 Start with `scripts/doctor.sh` when the failure smells like the environment rather than
