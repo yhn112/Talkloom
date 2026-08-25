@@ -1,8 +1,7 @@
 import Foundation
 import Testing
-import TranscriberCore
 
-@testable import Transcriber
+@testable import TranscriberCore
 
 @Suite("Recording session")
 struct RecordingSessionTests {

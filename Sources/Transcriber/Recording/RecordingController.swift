@@ -34,8 +34,12 @@ protocol SystemAudioCapturing: Sendable {
     func finishSession() async -> [TrackRecorder.Completion]
 }
 
-/// Owns the complete lifecycle of one recording. UI state and cleanup eligibility are the
-/// same state machine, so a failed start cannot leave a hidden capture path behind.
+/// Drives one recording: starts both paths, keeps them alive, and writes what happened.
+///
+/// What is *true* about a recording lives in `ActiveSession`, in `TranscriberCore`, where it
+/// can be tested without hardware. What lives here is everything that cannot move: the order
+/// the two paths are started in, the awaits on the capture actors, the manifest, and the state
+/// the menu reads.
 @MainActor
 @Observable
 final class RecordingController {
@@ -44,32 +48,6 @@ final class RecordingController {
         let microphone: [TrackRecorder.Summary]
         let systemAudio: [TrackRecorder.Summary]
         let warning: String?
-    }
-
-    struct ActiveSession {
-        enum Phase: Equatable {
-            case starting
-            case failingStartup(String)
-            case recording
-            case stopping
-        }
-
-        enum TrackState: Equatable {
-            case pending
-            case recording(CaptureRun)
-            case restarting(runID: UUID, attempt: Int, reason: String)
-            case verifying(CaptureRun)
-            case stopping
-            case unavailable(String)
-        }
-
-        let session: RecordingSession
-        var phase: Phase = .starting
-        var microphone: TrackState = .pending
-        var systemAudio: TrackState = .pending
-        var microphoneUsesVoiceProcessing = false
-        var systemAudioIsVerified = false
-        var warning: String?
     }
 
     struct FailureState {
@@ -209,8 +187,9 @@ final class RecordingController {
             do {
                 let run = try await systemAudio.begin(writingTo: created.systemTrackURL)
                 systemStarted = true
-                _ = updateStartingSession(created) { $0.systemAudio = .recording(run) }
-                await monitorSystemFirstSample(
+                _ = updateStartingSession(created) { $0[.systemAudio] = .recording(run) }
+                await monitorFirstSample(
+                    .systemAudio,
                     for: created,
                     file: created.systemTrackURL.lastPathComponent)
                 if await finishStartupFailureIfNeeded(for: created) { return }
@@ -242,7 +221,7 @@ final class RecordingController {
                 let message =
                     "Recording the microphone only, with echo cancellation off so the other participants are still captured through the speakers. \(error.localizedDescription)"
                 _ = updateStartingSession(created) {
-                    $0.systemAudio = .unavailable(error.localizedDescription)
+                    $0[.systemAudio] = .unavailable(error.localizedDescription)
                     $0.warning = message
                 }
                 AppLog.capture.error(
@@ -255,12 +234,13 @@ final class RecordingController {
                 voiceProcessing: systemVerified
             )
             _ = updateStartingSession(created) {
-                $0.microphone = .recording(microphoneRun)
+                $0[.microphone] = .recording(microphoneRun)
                 $0.microphoneUsesVoiceProcessing = systemVerified
                 $0.systemAudioIsVerified = systemVerified
             }
             if await finishStartupFailureIfNeeded(for: created) { return }
-            await monitorMicrophoneFirstSample(
+            await monitorFirstSample(
+                .microphone,
                 for: created,
                 file: created.microphoneTrackURL.lastPathComponent)
             if await finishStartupFailureIfNeeded(for: created) { return }
@@ -327,13 +307,46 @@ final class RecordingController {
         return true
     }
 
+    /// Applies a transition to a session that is recording, and publishes it only if the
+    /// transition actually happened.
+    ///
+    /// Every one of these runs after an await, by which time the session may have stopped,
+    /// been replaced, or moved past the state the transition was decided in. The guard is the
+    /// same every time, which is exactly why it is written once.
+    @discardableResult
+    private func updateRecordingSession(
+        _ session: RecordingSession,
+        _ update: (inout ActiveSession) -> Bool
+    ) -> Bool {
+        guard case .active(var active) = state, active.session == session,
+            active.phase == .recording
+        else { return false }
+        guard update(&active) else { return false }
+        state = .active(active)
+        return true
+    }
+
+    /// The live state of a session that is still recording, or `nil` if it no longer is.
+    private func recordingSession(_ session: RecordingSession) -> ActiveSession? {
+        guard case .active(let active) = state, active.session == session,
+            active.phase == .recording
+        else { return nil }
+        return active
+    }
+
     private static let unverifiedSystemAudioWarning =
         "System audio could not be verified, so the microphone was recorded without echo cancellation to preserve both sides of the meeting."
 
     private static let restartAttemptLimit = 3
 
-    private func monitorMicrophoneFirstSample(for session: RecordingSession, file: String) async {
-        await microphone.monitorFirstSample { [weak self] hostTime in
+    // MARK: - Talking to the two capture paths
+
+    private func monitorFirstSample(
+        _ path: TrackSource,
+        for session: RecordingSession,
+        file: String
+    ) async {
+        let handler: @Sendable (UInt64) -> Void = { [weak self] hostTime in
             Task { @MainActor [weak self] in
                 await self?.checkpointFirstSample(
                     file: file,
@@ -341,29 +354,33 @@ final class RecordingController {
                     for: session)
             }
         }
+        switch path {
+        case .microphone: await microphone.monitorFirstSample(handler)
+        case .systemAudio: await systemAudio.monitorFirstSample(handler)
+        }
     }
 
-    private func monitorSystemFirstSample(for session: RecordingSession, file: String) async {
-        await systemAudio.monitorFirstSample { [weak self] hostTime in
-            Task { @MainActor [weak self] in
-                await self?.checkpointFirstSample(
-                    file: file,
-                    hostTime: hostTime,
-                    for: session)
-            }
+    private func restartCapture(
+        _ path: TrackSource,
+        after event: CaptureRuntimeEvent,
+        writingTo url: URL
+    ) async throws -> CaptureRestartResult {
+        switch path {
+        case .microphone: try await microphone.restart(after: event, writingTo: url)
+        case .systemAudio: try await systemAudio.restart(after: event, writingTo: url)
         }
     }
 
     private func observeRuntimeEvents(for session: RecordingSession) async {
         await microphone.observeRuntimeEvents { [weak self] event in
             Task { @MainActor [weak self] in
-                await self?.handleMicrophoneRuntimeEvent(event, for: session)
+                await self?.handleRuntimeEvent(event, on: .microphone, for: session)
             }
         }
         guard isRecording(session) else { return }
         await systemAudio.observeRuntimeEvents { [weak self] event in
             Task { @MainActor [weak self] in
-                await self?.handleSystemRuntimeEvent(event, for: session)
+                await self?.handleRuntimeEvent(event, on: .systemAudio, for: session)
             }
         }
     }
@@ -420,143 +437,121 @@ final class RecordingController {
         return true
     }
 
-    private func handleMicrophoneRuntimeEvent(
+    // MARK: - Keeping a path alive
+
+    private func handleRuntimeEvent(
         _ event: CaptureRuntimeEvent,
+        on path: TrackSource,
         for session: RecordingSession
     ) async {
-        guard case .active(let active) = state, active.session == session,
-            active.phase == .recording,
-            isCurrent(event, in: active.microphone)
-        else { return }
-
-        if event.retryability == .terminal {
-            await markMicrophoneUnavailable(event.message, for: session)
+        guard let active = recordingSession(session), active.isCurrent(event, on: path) else {
             return
         }
-        await restartMicrophone(after: event, for: session)
-    }
 
-    private func handleSystemRuntimeEvent(
-        _ event: CaptureRuntimeEvent,
-        for session: RecordingSession
-    ) async {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording,
-            isCurrent(event, in: active.systemAudio)
-        else { return }
+        if path == .systemAudio {
+            // Whatever happens next, the system track has stopped being evidence that the
+            // remote side is recorded anywhere, so echo cancellation has stopped being safe.
+            updateRecordingSession(session) {
+                $0.systemAudioIsVerified = false
+                return true
+            }
+        }
 
-        active.systemAudioIsVerified = false
-        state = .active(active)
         if event.retryability == .terminal {
-            await markSystemAudioUnavailable(event.message, for: session)
+            await markUnavailable(path, event.message, for: session)
             return
         }
-        await restartSystemAudio(after: event, for: session)
+        await restart(path, after: event, for: session)
     }
 
-    private func restartMicrophone(
+    /// Rebuilds a failed path, up to a fixed number of attempts, and gives up loudly.
+    ///
+    /// A replacement always gets a new master segment rather than appending to the one that
+    /// failed: the wall-clock interval between them is missing from the recording, and the
+    /// manifest states it rather than silently closing the gap.
+    private func restart(
+        _ path: TrackSource,
         after event: CaptureRuntimeEvent,
         for session: RecordingSession
     ) async {
-        guard case .active(let initial) = state, initial.session == session,
-            initial.phase == .recording,
-            case .recording(let failedRun) = initial.microphone,
-            failedRun.id == event.runID
+        guard let active = recordingSession(session),
+            let failedRun = active[path].run, failedRun.id == event.runID
         else { return }
-        let nextURL = session.trackURL(
-            for: .microphone,
-            segmentIndex: failedRun.segmentIndex + 1)
+        let nextURL = session.trackURL(for: path, segmentIndex: failedRun.segmentIndex + 1)
 
         for attempt in 1...Self.restartAttemptLimit {
             guard
-                setRestarting(
-                    .microphone,
-                    runID: event.runID,
-                    attempt: attempt,
-                    reason: event.message,
-                    for: session)
+                updateRecordingSession(
+                    session,
+                    {
+                        $0.beginRestart(
+                            path, runID: event.runID, attempt: attempt, reason: event.message)
+                    })
             else { return }
 
             do {
-                switch try await microphone.restart(after: event, writingTo: nextURL) {
+                switch try await restartCapture(path, after: event, writingTo: nextURL) {
                 case .stale:
                     return
                 case .restarted(let run):
-                    guard
-                        completeRestart(
-                            .microphone,
-                            oldRunID: event.runID,
-                            newRun: run,
+                    await publishRestart(
+                        path, oldRunID: event.runID, newRun: run, writingTo: nextURL,
+                        for: session)
+                    return
+                }
+            } catch {
+                if attempt == Self.restartAttemptLimit {
+                    await markUnavailable(
+                        path,
+                        "\(event.message) Restart failed: \(error.localizedDescription)",
+                        for: session)
+                    return
+                }
+                await Task.yield()
+            }
+        }
+    }
+
+    /// What each path does with a replacement that started.
+    ///
+    /// This is the one place the two genuinely differ: a microphone segment is usable the
+    /// moment it runs, while a system segment has to prove it carries signal before the
+    /// microphone is allowed to subtract that same signal from its own track.
+    private func publishRestart(
+        _ path: TrackSource,
+        oldRunID: UUID,
+        newRun: CaptureRun,
+        writingTo nextURL: URL,
+        for session: RecordingSession
+    ) async {
+        switch path {
+        case .microphone:
+            guard
+                updateRecordingSession(
+                    session,
+                    {
+                        $0.completeRestart(
+                            path,
+                            oldRunID: oldRunID,
+                            newRun: newRun,
                             warning:
-                                "Microphone capture was interrupted and restored; its missing interval is stored as silence.",
-                            for: session)
-                    else { return }
-                    await monitorMicrophoneFirstSample(
-                        for: session,
-                        file: nextURL.lastPathComponent)
-                    await disableEchoCancellationIfNeeded(for: session)
-                    return
-                }
-            } catch {
-                if attempt == Self.restartAttemptLimit {
-                    await markMicrophoneUnavailable(
-                        "\(event.message) Restart failed: \(error.localizedDescription)",
-                        for: session)
-                    return
-                }
-                await Task.yield()
-            }
-        }
-    }
-
-    private func restartSystemAudio(
-        after event: CaptureRuntimeEvent,
-        for session: RecordingSession
-    ) async {
-        guard case .active(let initial) = state, initial.session == session,
-            initial.phase == .recording,
-            let failedRun = run(in: initial.systemAudio), failedRun.id == event.runID
-        else { return }
-        let nextURL = session.trackURL(
-            for: .systemAudio,
-            segmentIndex: failedRun.segmentIndex + 1)
-
-        for attempt in 1...Self.restartAttemptLimit {
-            guard
-                setRestarting(
-                    .systemAudio,
-                    runID: event.runID,
-                    attempt: attempt,
-                    reason: event.message,
-                    for: session)
+                                "Microphone capture was interrupted and restored; its missing interval is stored as silence."
+                        )
+                    })
             else { return }
+            await monitorFirstSample(path, for: session, file: nextURL.lastPathComponent)
+            await disableEchoCancellationIfNeeded(for: session)
 
-            do {
-                switch try await systemAudio.restart(after: event, writingTo: nextURL) {
-                case .stale:
-                    return
-                case .restarted(let run):
-                    guard
-                        beginVerification(
-                            oldRunID: event.runID,
-                            newRun: run,
-                            for: session)
-                    else { return }
-                    await monitorSystemFirstSample(
-                        for: session,
-                        file: nextURL.lastPathComponent)
-                    await verifyRestartedSystemAudio(run, for: session)
-                    return
-                }
-            } catch {
-                if attempt == Self.restartAttemptLimit {
-                    await markSystemAudioUnavailable(
-                        "\(event.message) Restart failed: \(error.localizedDescription)",
-                        for: session)
-                    return
-                }
-                await Task.yield()
-            }
+        case .systemAudio:
+            guard
+                updateRecordingSession(
+                    session,
+                    {
+                        $0.beginVerification(path, oldRunID: oldRunID, newRun: newRun)
+                    })
+            else { return }
+            await monitorFirstSample(path, for: session, file: nextURL.lastPathComponent)
+            await verifyRestartedSystemAudio(newRun, for: session)
         }
     }
 
@@ -574,41 +569,46 @@ final class RecordingController {
                 "The restarted system audio path could not be verified: \(error.localizedDescription)"
         }
 
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording,
-            active.systemAudio == .verifying(run)
-        else { return }
-        active.systemAudio = .recording(run)
-        active.systemAudioIsVerified = verificationFailure == nil
-        if let verificationFailure {
-            active.warning = appendingWarning(verificationFailure, to: active.warning)
-        } else {
-            active.warning = appendingWarning(
-                "System audio was interrupted and restored; its missing interval is stored as silence.",
-                to: active.warning)
-            permissions.markSystemAudioWorking()
+        let verified = updateRecordingSession(session) { active in
+            guard active[.systemAudio] == .verifying(run) else { return false }
+            active[.systemAudio] = .recording(run)
+            active.systemAudioIsVerified = verificationFailure == nil
+            if let verificationFailure {
+                active.appendWarning(verificationFailure)
+            } else {
+                active.appendWarning(
+                    "System audio was interrupted and restored; its missing interval is stored as silence."
+                )
+            }
+            return true
         }
-        state = .active(active)
+        guard verified else { return }
+        if verificationFailure == nil { permissions.markSystemAudioWorking() }
         await disableEchoCancellationIfNeeded(for: session)
     }
 
+    /// Rebuilds the microphone without echo cancellation once the system track stops being
+    /// able to justify it.
+    ///
+    /// Cancellation removes the other participants from the microphone track. That is only
+    /// safe while something else is recording them; when it is not, keeping the speakers in
+    /// the microphone is the difference between a degraded recording and half a meeting.
     private func disableEchoCancellationIfNeeded(for session: RecordingSession) async {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording,
+        guard let active = recordingSession(session),
             active.microphoneUsesVoiceProcessing,
-            case .recording(let run) = active.microphone,
+            case .recording(let run) = active[.microphone],
             !active.systemAudioIsVerified,
-            systemVerificationIsSettled(active.systemAudio)
+            active.systemVerificationIsSettled
         else { return }
 
-        let nextURL = session.trackURL(
-            for: .microphone,
-            segmentIndex: run.segmentIndex + 1)
-        active.microphone = .restarting(
-            runID: run.id,
-            attempt: 1,
-            reason: "system audio is no longer verified")
-        state = .active(active)
+        let nextURL = session.trackURL(for: .microphone, segmentIndex: run.segmentIndex + 1)
+        updateRecordingSession(session) {
+            $0[.microphone] = .restarting(
+                runID: run.id,
+                attempt: 1,
+                reason: "system audio is no longer verified")
+            return true
+        }
 
         do {
             switch try await microphone.reconfigure(
@@ -619,183 +619,68 @@ final class RecordingController {
             case .stale:
                 return
             case .restarted(let newRun):
-                guard case .active(var current) = state, current.session == session,
-                    current.phase == .recording,
-                    case .restarting(let runID, _, _) = current.microphone,
-                    runID == run.id
+                guard
+                    updateRecordingSession(
+                        session,
+                        { active in
+                            guard case .restarting(let runID, _, _) = active[.microphone],
+                                runID == run.id
+                            else { return false }
+                            active[.microphone] = .recording(newRun)
+                            active.microphoneUsesVoiceProcessing = false
+                            active.appendWarning(
+                                "The microphone was restarted without echo cancellation to preserve remote audio while system capture is unverified."
+                            )
+                            return true
+                        })
                 else { return }
-                current.microphone = .recording(newRun)
-                current.microphoneUsesVoiceProcessing = false
-                current.warning = appendingWarning(
-                    "The microphone was restarted without echo cancellation to preserve remote audio while system capture is unverified.",
-                    to: current.warning)
-                state = .active(current)
-                await monitorMicrophoneFirstSample(
-                    for: session,
-                    file: nextURL.lastPathComponent)
+                await monitorFirstSample(
+                    .microphone, for: session, file: nextURL.lastPathComponent)
             }
         } catch {
-            await markMicrophoneUnavailable(
+            await markUnavailable(
+                .microphone,
                 "The microphone could not be restarted without echo cancellation: \(error.localizedDescription)",
                 for: session)
         }
     }
 
-    private enum CapturePath: Equatable {
-        case microphone
-        case systemAudio
-    }
-
-    private func isCurrent(
-        _ event: CaptureRuntimeEvent,
-        in track: ActiveSession.TrackState
-    ) -> Bool {
-        run(in: track)?.id == event.runID
-    }
-
-    private func run(in track: ActiveSession.TrackState) -> CaptureRun? {
-        switch track {
-        case .recording(let run), .verifying(let run): run
-        case .pending, .restarting, .stopping, .unavailable: nil
-        }
-    }
-
-    @discardableResult
-    private func setRestarting(
-        _ path: CapturePath,
-        runID: UUID,
-        attempt: Int,
-        reason: String,
-        for session: RecordingSession
-    ) -> Bool {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording
-        else { return false }
-        let track = path == .microphone ? active.microphone : active.systemAudio
-        let matches: Bool
-        switch track {
-        case .recording(let run), .verifying(let run):
-            matches = run.id == runID && attempt == 1
-        case .restarting(let currentRunID, let currentAttempt, _):
-            matches = currentRunID == runID && attempt == currentAttempt + 1
-        case .pending, .stopping, .unavailable:
-            matches = false
-        }
-        guard matches else { return false }
-
-        let restarting = ActiveSession.TrackState.restarting(
-            runID: runID,
-            attempt: attempt,
-            reason: reason)
-        if path == .microphone {
-            active.microphone = restarting
-        } else {
-            active.systemAudio = restarting
-        }
-        state = .active(active)
-        return true
-    }
-
-    @discardableResult
-    private func completeRestart(
-        _ path: CapturePath,
-        oldRunID: UUID,
-        newRun: CaptureRun,
-        warning: String,
-        for session: RecordingSession
-    ) -> Bool {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording
-        else { return false }
-        let track = path == .microphone ? active.microphone : active.systemAudio
-        guard case .restarting(let runID, _, _) = track, runID == oldRunID else {
-            return false
-        }
-        if path == .microphone {
-            active.microphone = .recording(newRun)
-        } else {
-            active.systemAudio = .recording(newRun)
-        }
-        active.warning = appendingWarning(warning, to: active.warning)
-        state = .active(active)
-        return true
-    }
-
-    @discardableResult
-    private func beginVerification(
-        oldRunID: UUID,
-        newRun: CaptureRun,
-        for session: RecordingSession
-    ) -> Bool {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording,
-            case .restarting(let runID, _, _) = active.systemAudio,
-            runID == oldRunID
-        else { return false }
-        active.systemAudio = .verifying(newRun)
-        state = .active(active)
-        return true
-    }
-
-    private func markMicrophoneUnavailable(
+    private func markUnavailable(
+        _ path: TrackSource,
         _ reason: String,
         for session: RecordingSession
     ) async {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording
+        let message = "\(Self.pathName(path)) capture could not be restored: \(reason)"
+        guard
+            updateRecordingSession(
+                session,
+                {
+                    $0.markUnavailable(path, message); return true
+                })
         else { return }
-        let message = "Microphone capture could not be restored: \(reason)"
-        active.microphone = .unavailable(message)
-        active.warning = appendingWarning(message, to: active.warning)
-        state = .active(active)
+        if path == .systemAudio { await disableEchoCancellationIfNeeded(for: session) }
         await finishIfNoPathRemains(for: session)
     }
 
-    private func markSystemAudioUnavailable(
-        _ reason: String,
-        for session: RecordingSession
-    ) async {
-        guard case .active(var active) = state, active.session == session,
-            active.phase == .recording
-        else { return }
-        let message = "System audio capture could not be restored: \(reason)"
-        active.systemAudio = .unavailable(message)
-        active.systemAudioIsVerified = false
-        active.warning = appendingWarning(message, to: active.warning)
-        state = .active(active)
-        await disableEchoCancellationIfNeeded(for: session)
-        await finishIfNoPathRemains(for: session)
+    private static func pathName(_ path: TrackSource) -> String {
+        switch path {
+        case .microphone: "Microphone"
+        case .systemAudio: "System audio"
+        }
     }
 
     private func finishIfNoPathRemains(for session: RecordingSession) async {
-        guard case .active(let active) = state, active.session == session,
-            active.phase == .recording,
-            case .unavailable(let microphoneFailure) = active.microphone,
-            case .unavailable(let systemFailure) = active.systemAudio
-        else { return }
+        guard let active = recordingSession(session), let lost = active.lostEveryPath else {
+            return
+        }
         await finish(
             session: session,
-            failure: "\(microphoneFailure) \(systemFailure)")
-    }
-
-    private func systemVerificationIsSettled(_ track: ActiveSession.TrackState) -> Bool {
-        switch track {
-        case .recording, .unavailable: true
-        case .pending, .restarting, .verifying, .stopping: false
-        }
-    }
-
-    private func appendingWarning(_ warning: String, to current: String?) -> String {
-        guard let current else { return warning }
-        guard !current.contains(warning) else { return current }
-        return "\(current) \(warning)"
+            failure: "\(lost.microphone) \(lost.systemAudio)")
     }
 
     private func finish(session: RecordingSession, failure: String?) async {
         guard case .active(var active) = state, active.session == session else { return }
-        active.phase = .stopping
-        active.microphone = .stopping
-        active.systemAudio = .stopping
+        active.markStopping()
         state = .active(active)
 
         async let microphoneTrack = microphone.finishSession()

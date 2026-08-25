@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import TranscriberCore
 
 @testable import Transcriber
 
