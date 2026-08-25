@@ -239,7 +239,7 @@ microphone and their final logical endpoints were 20.351 s and 20.193 s, a 0.157
 difference. The microphone's switch to a 16 kHz native device also confirms that a rate
 change starts a new master instead of changing the existing WAV's format.
 
-`MicrophoneCapture` therefore owns two stable engine graphs for its process-long lifetime:
+`MicrophoneProducer` therefore owns two stable engine graphs for its process-long lifetime:
 one has VPIO enabled once and never disabled, and the other has never hosted VPIO. A
 voice-processed-to-raw transition borrows the second graph without releasing or toggling
 the first. Physical segments still receive new tap closures, inputs, recorders and WAVs, so

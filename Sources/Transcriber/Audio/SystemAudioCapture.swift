@@ -1,15 +1,22 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import TranscriberCore
 
-/// Records everything the machine plays, through a CoreAudio process tap.
+/// A system-audio generation takes no configuration: there is one way to tap the machine's
+/// output, and the tap reports what it will deliver.
+struct SystemAudioOptions: Sendable {
+    init() {}
+}
+
+/// Produces system-audio generations through a CoreAudio process tap.
 ///
 /// A process tap rather than ScreenCaptureKit because SCK asks for Screen Recording, a
 /// heavyweight permission for something that only needs audio. The call sequence and the
 /// header citations behind every constant used here are in `docs/system-audio-capture.md`.
 ///
 /// A tap produces nothing on its own: it has to be wrapped in a private aggregate device.
-actor SystemAudioCapture: SystemAudioCapturing {
+final class SystemAudioProducer: SegmentProducer {
     enum Failure: Error, LocalizedError {
         case tapCreationFailed(String)
         case tapFormatUnavailable(String)
@@ -32,7 +39,7 @@ actor SystemAudioCapture: SystemAudioCapturing {
             case .ioProcCreationFailed(let detail):
                 "Could not attach to the system audio tap (\(detail))."
             case .deviceStartFailed(let detail):
-                "Could not start the system audio tap (\(detail))."
+                "Could not start the system audio device (\(detail))."
             case .unusableTapFormat(let sampleRate, let channelCount):
                 "The system audio tap reported an unusable format (\(sampleRate) Hz, \(channelCount) channels)."
             }
@@ -40,12 +47,40 @@ actor SystemAudioCapture: SystemAudioCapturing {
     }
 
     /// One live tap: the objects that have to be torn down together, in this order.
-    private struct Tap {
-        var processTap: AudioHardwareTap
-        var aggregateDevice: AudioHardwareAggregateDevice
+    ///
+    /// Each field is cleared as its object is destroyed, so a teardown that partly failed
+    /// says exactly what is still held rather than being retried blind.
+    final class Generation {
+        var processTap: AudioHardwareTap?
+        var aggregateDevice: AudioHardwareAggregateDevice?
         var ioProcID: AudioDeviceIOProcID?
-        var format: AudioStreamBasicDescription
+        let format: AudioStreamBasicDescription
+
+        /// Set when the owner has asked for this generation back. Until then it is live and
+        /// must not be swept up by another generation's teardown.
+        var isRetired = false
+
+        var isFullyReleased: Bool {
+            processTap == nil && aggregateDevice == nil && ioProcID == nil
+        }
+
+        init(
+            processTap: AudioHardwareTap?,
+            aggregateDevice: AudioHardwareAggregateDevice?,
+            ioProcID: AudioDeviceIOProcID?,
+            format: AudioStreamBasicDescription
+        ) {
+            self.processTap = processTap
+            self.aggregateDevice = aggregateDevice
+            self.ioProcID = ioProcID
+            self.format = format
+        }
     }
+
+    /// How long the tap may deliver nothing before it is presumed dead. With auto-start
+    /// off the tap produces frames continuously, silence included, so a gap this long is
+    /// not a quiet moment — it is a stopped stream.
+    private static let stallTolerance = 2
 
     /// The IO block is dispatched onto this queue. The header is explicit that IO blocks
     /// are dispatched *synchronously*, so this is still a real-time context — the queue
@@ -53,334 +88,200 @@ actor SystemAudioCapture: SystemAudioCapturing {
     private let ioQueue = DispatchQueue(
         label: "me.diskin.Transcriber.system-audio", qos: .userInitiated)
 
-    private struct LiveSegment {
-        let run: CaptureRun
-        let tap: Tap
-        let recorder: TrackRecorder
-    }
-
-    private struct InterruptedPath {
-        let runID: UUID
-        let nextSegmentIndex: Int
-        let precedingEndHostTime: UInt64?
-    }
-
-    private var current: LiveSegment?
-    private var interrupted: InterruptedPath?
-    private var completedSegments: [TrackRecorder.Completion] = []
-    private var retiringRecorder: TrackRecorder?
-    private var preparingRecorder: TrackRecorder?
-    private var preparingTap: Tap?
-    private var preparingURL: URL?
-    private var watchdogTask: Task<Void, Never>?
-    private var lastObservedSampleCount = 0
-    private var stalledSeconds = 0
-    private var runtimeEventHandler: (@Sendable (CaptureRuntimeEvent) -> Void)?
-    private var reportedRunIDs: Set<UUID> = []
-    private var operationID = UUID()
-    private var replacementRunID: UUID?
-    private var isFinishingSession = false
-    private var finishWaiters: [CheckedContinuation<[TrackRecorder.Completion], Never>] = []
-
-    /// Last resort for the tap and its aggregate device.
+    /// Every generation this producer has acquired and not yet fully given back.
     ///
-    /// `stop()` is the ordinary path and does this properly, flushing the file as well.
-    /// This exists because an aggregate device that is never destroyed outlives the process
-    /// that made it — it becomes litter in the user's audio system, visible to every other
-    /// app, and nothing cleans it up. Dropping this actor without stopping it should not
-    /// leave that behind.
+    /// An aggregate device that is never destroyed outlives the process that made it: it
+    /// becomes litter in the user's audio system, visible to every other app, and nothing
+    /// cleans it up. Logging a failed teardown and dropping the handle guarantees that
+    /// outcome, so a handle stays here — retried on the next teardown, and finally in
+    /// `deinit` — until CoreAudio accepts it.
+    private var outstanding: [Generation] = []
+    private var watchdogTask: Task<Void, Never>?
+
+    let descriptor = CaptureTrackDescriptor(
+        trackLabel: "system",
+        name: "system audio",
+        source: .systemAudio
+    )
+
+    init() {}
+
     deinit {
-        if let current {
-            AppLog.capture.error(
-                "the system audio tap was dropped without being stopped; tearing it down")
-            Self.destroy(current.tap, context: "deinit fallback")
-        }
-        if let preparingTap {
-            Self.destroy(preparingTap, context: "deinit preparation fallback")
-        }
         watchdogTask?.cancel()
-    }
-
-    /// Starts capture into `url` and returns the sample rate the tap reported.
-    @discardableResult
-    func start(writingTo url: URL) async throws -> Double {
-        if let current { return current.tap.format.mSampleRate }
-        guard interrupted == nil, retiringRecorder == nil, preparingRecorder == nil else {
-            throw CancellationError()
-        }
-        completedSegments = []
-        interrupted = nil
-        let segment = try await startSegment(
-            writingTo: url,
-            segmentIndex: 0,
-            precedingEndHostTime: nil
-        )
-        return segment.tap.format.mSampleRate
-    }
-
-    func begin(writingTo url: URL) async throws -> CaptureRun {
-        if let current { return current.run }
-        _ = try await start(writingTo: url)
-        guard let current else { throw CancellationError() }
-        return current.run
-    }
-
-    func observeRuntimeEvents(
-        _ handler: @escaping @Sendable (CaptureRuntimeEvent) -> Void
-    ) async {
-        runtimeEventHandler = handler
-        guard let current else { return }
-        startWatchdog(for: current.run.id)
-        await observeRecorderFailure(current.recorder, runID: current.run.id)
-    }
-
-    /// Compatibility for direct callers while the controller moves to typed events.
-    func monitorRuntimeFailures(_ handler: @escaping @Sendable (String) -> Void) async {
-        await observeRuntimeEvents { handler($0.message) }
-    }
-
-    func restart(
-        after event: CaptureRuntimeEvent,
-        writingTo nextSegmentURL: URL
-    ) async throws -> CaptureRestartResult {
-        guard event.retryability == .restartable else { return .stale }
-        guard replacementRunID == nil else { return .stale }
-        replacementRunID = event.runID
-        defer {
-            if replacementRunID == event.runID { replacementRunID = nil }
-        }
-        guard let context = await interrupt(runID: event.runID) else { return .stale }
-        guard !isFinishingSession, interrupted?.runID == context.runID else { return .stale }
-        let segment: LiveSegment
-        do {
-            segment = try await startSegment(
-                writingTo: nextSegmentURL,
-                segmentIndex: context.nextSegmentIndex,
-                precedingEndHostTime: context.precedingEndHostTime
-            )
-        } catch is CancellationError {
-            return .stale
-        }
-        guard current?.run == segment.run, !isFinishingSession else { return .stale }
-        interrupted = nil
-        return .restarted(segment.run)
-    }
-
-    func monitorFirstSample(_ handler: @escaping @Sendable (UInt64) -> Void) async {
-        guard let current else { return }
-        await current.recorder.observeFirstSample(handler)
-    }
-
-    /// Actively proves that this running tap carries output before microphone AEC can erase
-    /// that same output from the only other track.
-    func verifySignal() async throws -> Bool {
-        guard let current else { return false }
-        let observation = await current.recorder.beginSignalObservation(
-            above: SystemAudioProbe.signalThreshold)
-        do {
-            try await SystemAudioProbe.play()
-        } catch {
-            await current.recorder.cancelSignalObservation(observation)
-            throw error
-        }
-        return await current.recorder.waitForSignal(
-            observation, timeout: SystemAudioProbe.observationTimeout)
-    }
-
-    func stop() async -> TrackRecorder.Completion? {
-        await finishSession().last
-    }
-
-    func finishSession() async -> [TrackRecorder.Completion] {
-        if isFinishingSession {
-            return await withCheckedContinuation { finishWaiters.append($0) }
-        }
-        guard
-            current != nil || retiringRecorder != nil || preparingRecorder != nil
-                || !completedSegments.isEmpty
-        else { return [] }
-
-        isFinishingSession = true
-        operationID = UUID()
-        replacementRunID = nil
-        runtimeEventHandler = nil
-        cancelWatchdog()
-
-        let live = current
-        current = nil
-        if let live {
-            live.recorder.input.closeProducer()
-            Self.destroy(live.tap, context: "stopping system audio capture")
-        }
-        let retiringRecorder = self.retiringRecorder
-        self.retiringRecorder = nil
-        let preparingRecorder = self.preparingRecorder
-        let preparingTap = self.preparingTap
-        let preparingURL = self.preparingURL
-        self.preparingRecorder = nil
-        self.preparingTap = nil
-        self.preparingURL = nil
-        if let preparingTap {
-            Self.destroy(preparingTap, context: "stopping system audio preparation")
-        }
-
-        if let live { appendCompleted(await finalizedCompletion(for: live.recorder)) }
-        if let retiringRecorder {
-            appendCompleted(await finalizedCompletion(for: retiringRecorder))
-        }
-        if let preparingRecorder {
-            _ = await preparingRecorder.finish()
-            if let preparingURL { try? FileManager.default.removeItem(at: preparingURL) }
-        }
-        interrupted = nil
-
-        let completions = completedSegments
-        completedSegments = []
-        reportedRunIDs = []
-        isFinishingSession = false
-        let waiters = finishWaiters
-        finishWaiters.removeAll(keepingCapacity: false)
-        for waiter in waiters { waiter.resume(returning: completions) }
-        return completions
-    }
-
-    private func startSegment(
-        writingTo url: URL,
-        segmentIndex: Int,
-        precedingEndHostTime: UInt64?
-    ) async throws -> LiveSegment {
-        guard !isFinishingSession else { throw CancellationError() }
-        let probe = try createTap()
-        let sampleRate = probe.format.mSampleRate
-        guard sampleRate > 0, probe.format.mChannelsPerFrame > 0 else {
-            Self.destroy(probe, context: "rejecting an unusable tap format")
-            throw Failure.unusableTapFormat(
-                sampleRate: sampleRate,
-                channelCount: probe.format.mChannelsPerFrame
-            )
-        }
-
-        let recorder: TrackRecorder
-        do {
-            recorder = try TrackRecorder(
-                label: "system",
-                url: url,
-                source: .systemAudio,
-                segmentIndex: segmentIndex,
-                sampleRate: sampleRate,
-                content: .remote,
-                precedingSegmentEndHostTime: precedingEndHostTime
-            )
-        } catch {
-            Self.destroy(probe, context: "rolling back track recorder creation")
-            throw error
-        }
-
-        let run = CaptureRun(id: UUID(), segmentIndex: segmentIndex)
-        let operationID = UUID()
-        self.operationID = operationID
-        preparingRecorder = recorder
-        preparingTap = probe
-        preparingURL = url
-        await recorder.start()
-        guard self.operationID == operationID, !isFinishingSession,
-            preparingRecorder != nil, var running = preparingTap
-        else { throw CancellationError() }
-
-        do {
-            try attachAndStart(&running, feeding: recorder.input)
-        } catch {
-            preparingTap = nil
-            Self.destroy(running, context: "rolling back a failed system audio start")
-            _ = await recorder.finish()
-            guard self.operationID == operationID, !isFinishingSession else {
-                throw CancellationError()
+        for generation in outstanding {
+            if !generation.isRetired {
+                AppLog.capture.error(
+                    "the system audio tap was dropped without being stopped; tearing it down")
             }
-            preparingRecorder = nil
-            preparingURL = nil
-            try? FileManager.default.removeItem(at: url)
-            throw error
+            Self.destroy(generation, context: "producer teardown")
         }
-
-        let segment = LiveSegment(run: run, tap: running, recorder: recorder)
-        preparingRecorder = nil
-        preparingTap = nil
-        preparingURL = nil
-        current = segment
-        lastObservedSampleCount = 0
-        stalledSeconds = 0
-        if runtimeEventHandler != nil {
-            startWatchdog(for: run.id)
-            await observeRecorderFailure(recorder, runID: run.id)
+        let stranded = outstanding.filter { !$0.isFullyReleased }.count
+        if stranded > 0 {
+            AppLog.capture.error(
+                "\(stranded, privacy: .public) system audio resource(s) could not be destroyed and are being abandoned at exit"
+            )
         }
-        guard self.operationID == operationID, current?.run == run, !isFinishingSession else {
-            throw CancellationError()
-        }
-
-        let format = running.format
-        AppLog.capture.notice(
-            "system audio tap format: \(format.mSampleRate, format: .fixed(precision: 0), privacy: .public) Hz, \(format.mChannelsPerFrame, privacy: .public) ch, \(format.mBytesPerFrame, privacy: .public) bytes/frame, \(format.mFramesPerPacket, privacy: .public) frames/packet, flags 0x\(String(format.mFormatFlags, radix: 16), privacy: .public)"
-        )
-        return segment
     }
 
-    private func interrupt(runID: UUID) async -> InterruptedPath? {
-        if let interrupted, interrupted.runID == runID { return interrupted }
-        guard !isFinishingSession, let segment = current, segment.run.id == runID else {
-            return nil
-        }
+    func content(for options: SystemAudioOptions) -> TrackContent { .remote }
 
-        cancelWatchdog()
-        current = nil
-        let operationID = UUID()
-        self.operationID = operationID
-        retiringRecorder = segment.recorder
-        segment.recorder.input.closeProducer()
-        Self.destroy(segment.tap, context: "restarting system audio capture")
-        while segment.recorder.input.hasActiveProducerWrite { await Task.yield() }
-        guard self.operationID == operationID, !isFinishingSession else { return nil }
-        let context = InterruptedPath(
-            runID: runID,
-            nextSegmentIndex: segment.run.segmentIndex + 1,
-            precedingEndHostTime: segment.recorder.input.lastSampleEndHostTime
+    func acquire(_ options: SystemAudioOptions) throws -> (Generation, SegmentFormat) {
+        sweepRetired(context: "before acquiring a system audio tap")
+
+        let generation = try createTap()
+        outstanding.append(generation)
+        let format = SegmentFormat(
+            sampleRate: generation.format.mSampleRate,
+            channelCount: generation.format.mChannelsPerFrame
         )
-        interrupted = context
-        let completion = await finalizedCompletion(for: segment.recorder)
-        guard self.operationID == operationID, !isFinishingSession else { return nil }
-        retiringRecorder = nil
-        appendCompleted(completion)
-        return context
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            release(generation, context: "rejecting an unusable tap format")
+            throw Failure.unusableTapFormat(
+                sampleRate: format.sampleRate,
+                channelCount: format.channelCount
+            )
+        }
+        return (generation, format)
     }
 
-    private func finalizedCompletion(for recorder: TrackRecorder) async -> TrackRecorder.Completion
-    {
-        let shape = recorder.input.lastBufferListShape
+    func attach(_ generation: Generation, to input: TrackInput) throws {
+        guard let aggregateDevice = generation.aggregateDevice else {
+            throw Failure.ioProcCreationFailed("the aggregate device was already destroyed")
+        }
+
+        var ioProcID: AudioDeviceIOProcID?
+        let createStatus = AudioDeviceCreateIOProcIDWithBlock(
+            &ioProcID, aggregateDevice.id, ioQueue
+        ) { _, inputData, inputTime, _, _ in
+            // Real-time context: one coordinated timestamp/boundary/sample handoff into
+            // preallocated SPSC rings, nothing else.
+            input.write(
+                inputData,
+                atHostTime: inputTime.pointee.mFlags.contains(.hostTimeValid)
+                    ? inputTime.pointee.mHostTime : nil
+            )
+        }
+        guard createStatus == noErr, let ioProcID else {
+            throw Failure.ioProcCreationFailed(Self.describe(createStatus))
+        }
+        generation.ioProcID = ioProcID
+
+        do {
+            try aggregateDevice.start(IOProcID: ioProcID)
+        } catch {
+            let destroyStatus = AudioDeviceDestroyIOProcID(aggregateDevice.id, ioProcID)
+            if destroyStatus != noErr {
+                AppLog.capture.error(
+                    "could not destroy the IOProc after device start failed: \(Self.describe(destroyStatus), privacy: .public)"
+                )
+            } else {
+                generation.ioProcID = nil
+            }
+            throw Failure.deviceStartFailed(Self.describe(error))
+        }
+    }
+
+    func release(_ generation: Generation, context: String) {
+        generation.isRetired = true
+        sweepRetired(context: context)
+    }
+
+    /// Destroys every retired generation, and keeps whatever CoreAudio still refuses.
+    ///
+    /// A live generation is never touched here: during a restart the replacement is acquired
+    /// while its predecessor is still being given back, and sweeping both would tear down the
+    /// tap that is already recording again.
+    private func sweepRetired(context: String) {
+        for generation in outstanding where generation.isRetired {
+            Self.destroy(generation, context: context)
+        }
+        outstanding.removeAll { $0.isRetired && $0.isFullyReleased }
+        let held = outstanding.filter(\.isRetired).count
+        if held > 0 {
+            AppLog.capture.error(
+                "\(context, privacy: .public): \(held, privacy: .public) system audio resource(s) are still held and will be retried"
+            )
+        }
+    }
+
+    func beginWatching(
+        _ generation: Generation,
+        input: TrackInput,
+        report: @escaping @Sendable (String, CaptureRuntimeEvent.Retryability) -> Void
+    ) {
+        stopWatching()
+        // Nothing of this producer is captured: the task holds only the ring it reads, the
+        // way out it reports through, and its own counters. Those counters are locals rather
+        // than producer state because they belong to this generation and to this task, and
+        // nothing outside it may read them.
+        let stallTolerance = Self.stallTolerance
+        watchdogTask = Task {
+            var lastObservedSampleCount = 0
+            var stalledSeconds = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+
+                let refused = input.unexpectedLayoutCount
+                if refused > 0 {
+                    report(
+                        "The system audio tap delivered \(refused) unsupported buffer block(s).",
+                        .restartable)
+                    return
+                }
+
+                let received = input.ring.totalSampleCount
+                if received > lastObservedSampleCount {
+                    lastObservedSampleCount = received
+                    stalledSeconds = 0
+                    continue
+                }
+
+                stalledSeconds += 1
+                guard stalledSeconds >= stallTolerance else { continue }
+                report(
+                    "The system audio tap stopped delivering samples for \(stallTolerance) seconds.",
+                    .restartable)
+                return
+            }
+        }
+    }
+
+    func stopWatching() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
+    }
+
+    /// Blocks the tap refused for arriving in an unexpected layout are the track's problem,
+    /// not the drain's, so they are folded into the completion here.
+    func amend(
+        _ completion: TrackRecorder.Completion,
+        from input: TrackInput
+    ) -> TrackRecorder.Completion {
+        let shape = input.lastBufferListShape
         AppLog.capture.debug(
             "system audio last block: \(shape.buffers, privacy: .public) buffer(s), \(shape.channels, privacy: .public) ch, \(shape.byteCount, privacy: .public) bytes"
         )
-        let refused = recorder.input.unexpectedLayoutCount
-        if refused > 0 {
-            AppLog.capture.error(
-                "the system audio device delivered \(refused, privacy: .public) block(s) in an unexpected layout, and they were dropped; the last was \(shape.buffers, privacy: .public) buffer(s) of \(shape.channels, privacy: .public) channel(s)"
-            )
-        }
-        var completion = await recorder.finish()
-        if refused > 0, completion.failure == nil {
-            completion = TrackRecorder.Completion(
-                summary: completion.summary,
-                failure: .unexpectedBufferLayout(label: "system audio", blockCount: refused)
-            )
-        }
-        return completion
+        let refused = input.unexpectedLayoutCount
+        guard refused > 0 else { return completion }
+        AppLog.capture.error(
+            "the system audio device delivered \(refused, privacy: .public) block(s) in an unexpected layout, and they were dropped; the last was \(shape.buffers, privacy: .public) buffer(s) of \(shape.channels, privacy: .public) channel(s)"
+        )
+        guard completion.failure == nil else { return completion }
+        return TrackRecorder.Completion(
+            summary: completion.summary,
+            failure: .unexpectedBufferLayout(label: "system audio", blockCount: refused)
+        )
     }
 
-    private func appendCompleted(_ completion: TrackRecorder.Completion) {
-        guard !completedSegments.contains(where: { $0.summary.url == completion.summary.url })
-        else {
-            return
-        }
-        completedSegments.append(completion)
-        let summary = completion.summary
+    func logStarted(_ generation: Generation, format: SegmentFormat) {
+        let tapFormat = generation.format
+        AppLog.capture.notice(
+            "system audio tap format: \(tapFormat.mSampleRate, format: .fixed(precision: 0), privacy: .public) Hz, \(tapFormat.mChannelsPerFrame, privacy: .public) ch, \(tapFormat.mBytesPerFrame, privacy: .public) bytes/frame, \(tapFormat.mFramesPerPacket, privacy: .public) frames/packet, flags 0x\(String(tapFormat.mFormatFlags, radix: 16), privacy: .public)"
+        )
+    }
+
+    func logCompleted(_ summary: TrackRecorder.Summary) {
         AppLog.capture.notice(
             "system audio track: \(summary.duration, format: .fixed(precision: 1), privacy: .public) s, peak \(summary.peakAmplitude, format: .fixed(precision: 4), privacy: .public), dropped \(summary.droppedSampleCount, privacy: .public) samples"
         )
@@ -393,7 +294,7 @@ actor SystemAudioCapture: SystemAudioCapturing {
 
     // MARK: - Building the tap
 
-    private func createTap() throws -> Tap {
+    private func createTap() throws -> Generation {
         // An empty exclusion list means every process that outputs audio. Mono because the
         // mixdown is what ASR wants anyway, so nothing downstream has to fold it.
         let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
@@ -434,7 +335,7 @@ actor SystemAudioCapture: SystemAudioCapturing {
                 throw Failure.tapUIDUnavailable(Self.describe(error))
             }
             let aggregateDevice = try createAggregate(around: tapUID)
-            return Tap(
+            return Generation(
                 processTap: processTap,
                 aggregateDevice: aggregateDevice,
                 ioProcID: nil,
@@ -490,74 +391,62 @@ actor SystemAudioCapture: SystemAudioCapturing {
         }
     }
 
-    private func attachAndStart(_ tap: inout Tap, feeding trackInput: TrackInput) throws {
-        var ioProcID: AudioDeviceIOProcID?
-        let createStatus = AudioDeviceCreateIOProcIDWithBlock(
-            &ioProcID, tap.aggregateDevice.id, ioQueue
-        ) { _, inputData, inputTime, _, _ in
-            // Real-time context: one coordinated timestamp/boundary/sample handoff into
-            // preallocated SPSC rings, nothing else.
-            trackInput.write(
-                inputData,
-                atHostTime: inputTime.pointee.mFlags.contains(.hostTimeValid)
-                    ? inputTime.pointee.mHostTime : nil
-            )
-        }
-        guard createStatus == noErr, let ioProcID else {
-            throw Failure.ioProcCreationFailed(Self.describe(createStatus))
-        }
-        tap.ioProcID = ioProcID
-
-        do {
-            try tap.aggregateDevice.start(IOProcID: ioProcID)
-        } catch {
-            let destroyStatus = AudioDeviceDestroyIOProcID(tap.aggregateDevice.id, ioProcID)
-            if destroyStatus != noErr {
-                AppLog.capture.error(
-                    "could not destroy the IOProc after device start failed: \(Self.describe(destroyStatus), privacy: .public)"
-                )
-            } else {
-                tap.ioProcID = nil
-            }
-            throw Failure.deviceStartFailed(Self.describe(error))
-        }
-    }
-
-    /// Tears a tap down in the order the objects depend on each other. An aggregate device
-    /// that is never destroyed outlives the process.
-    private static func destroy(_ tap: Tap, context: String) {
-        if let ioProcID = tap.ioProcID {
+    /// Tears a generation down in the order the objects depend on each other, clearing each
+    /// field as its object goes, so a partly failed teardown says exactly what is still held.
+    ///
+    /// Every step is attempted even when an earlier one failed: a leaked IOProc is not a
+    /// reason to leak the aggregate device as well.
+    private static func destroy(_ generation: Generation, context: String) {
+        let remaining = generation
+        if let aggregateDevice = remaining.aggregateDevice, let ioProcID = remaining.ioProcID {
             do {
-                try tap.aggregateDevice.stop(IOProcID: ioProcID)
+                try aggregateDevice.stop(IOProcID: ioProcID)
             } catch {
                 AppLog.capture.error(
                     "\(context, privacy: .public): could not stop the aggregate device: \(Self.describe(error), privacy: .public)"
                 )
             }
-            let status = AudioDeviceDestroyIOProcID(tap.aggregateDevice.id, ioProcID)
-            if status != noErr {
+            let status = AudioDeviceDestroyIOProcID(aggregateDevice.id, ioProcID)
+            if status == noErr {
+                remaining.ioProcID = nil
+            } else {
                 AppLog.capture.error(
                     "\(context, privacy: .public): could not destroy the IOProc: \(Self.describe(status), privacy: .public)"
                 )
             }
+        } else {
+            // Nothing left to destroy it against; the aggregate took it with it.
+            remaining.ioProcID = nil
         }
-        do {
-            try AudioHardwareSystem.shared.destroyAggregateDevice(tap.aggregateDevice)
-        } catch {
-            AppLog.capture.error(
-                "\(context, privacy: .public): could not destroy the aggregate device: \(Self.describe(error), privacy: .public)"
-            )
+
+        if let aggregateDevice = remaining.aggregateDevice {
+            do {
+                try AudioHardwareSystem.shared.destroyAggregateDevice(aggregateDevice)
+                remaining.aggregateDevice = nil
+            } catch {
+                AppLog.capture.error(
+                    "\(context, privacy: .public): could not destroy the aggregate device: \(Self.describe(error), privacy: .public)"
+                )
+            }
         }
-        Self.destroyProcessTap(tap.processTap, context: context)
+
+        if let processTap = remaining.processTap {
+            if Self.destroyProcessTap(processTap, context: context) {
+                remaining.processTap = nil
+            }
+        }
     }
 
-    private static func destroyProcessTap(_ tap: AudioHardwareTap, context: String) {
+    @discardableResult
+    private static func destroyProcessTap(_ tap: AudioHardwareTap, context: String) -> Bool {
         do {
             try AudioHardwareSystem.shared.destroyProcessTap(tap)
+            return true
         } catch {
             AppLog.capture.error(
                 "\(context, privacy: .public): could not destroy the process tap: \(Self.describe(error), privacy: .public)"
             )
+            return false
         }
     }
 
@@ -578,91 +467,45 @@ actor SystemAudioCapture: SystemAudioCapturing {
         }
         return "'\(String(decoding: bytes, as: UTF8.self))'"
     }
+}
 
-    // MARK: - Surviving a dead tap
+/// The system-audio track: one lifecycle, one producer.
+typealias SystemAudioCapture = TrackCapture<SystemAudioProducer>
 
-    /// How long the tap may deliver nothing before it is presumed dead. With auto-start
-    /// off the tap produces frames continuously, silence included, so a gap this long is
-    /// not a quiet moment — it is a stopped stream.
-    private static let stallTolerance = 2
+extension TrackCapture where Producer == SystemAudioProducer {
+    /// Starts capture into `url` and reports the format the tap chose.
+    @discardableResult
+    func start(writingTo url: URL) async throws -> SegmentFormat {
+        try await start(writingTo: url, options: SystemAudioOptions())
+    }
+}
 
-    private func startWatchdog(for runID: UUID) {
-        cancelWatchdog()
-        watchdogTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                await self?.checkForStall(runID: runID)
-            }
-        }
+extension TrackCapture: SystemAudioCapturing where Producer == SystemAudioProducer {
+    func begin(writingTo url: URL) async throws -> CaptureRun {
+        try await begin(writingTo: url, options: SystemAudioOptions())
     }
 
-    private func cancelWatchdog() {
-        watchdogTask?.cancel()
-        watchdogTask = nil
+    func restart(
+        after event: CaptureRuntimeEvent,
+        writingTo nextSegmentURL: URL
+    ) async throws -> CaptureRestartResult {
+        guard event.retryability == .restartable else { return .stale }
+        return try await replace(runID: event.runID, writingTo: nextSegmentURL, options: nil)
     }
 
-    /// Watches the sample count rather than the default output device.
-    ///
-    /// Changing the output device is the documented way to kill a tap, but it is not the
-    /// only one, and listening for it means rebuilding a perfectly healthy tap every time
-    /// someone plugs in headphones — a gap in the recording to fix a problem that may not
-    /// have happened. A tap that has stopped delivering is the thing that actually matters,
-    /// it covers every cause, and nothing else reports it: the file simply goes quiet.
-    private func checkForStall(runID: UUID) async {
-        guard let current, current.run.id == runID else { return }
-
-        let refused = current.recorder.input.unexpectedLayoutCount
-        if refused > 0 {
-            reportRuntimeEvent(
-                runID: runID,
-                message: "The system audio tap delivered \(refused) unsupported buffer block(s).",
-                retryability: .restartable
-            )
-            return
+    /// Actively proves that this running tap carries output before microphone AEC can erase
+    /// that same output from the only other track.
+    func verifySignal() async throws -> Bool {
+        guard let recorder = currentRecorder else { return false }
+        let observation = await recorder.beginSignalObservation(
+            above: SystemAudioProbe.signalThreshold)
+        do {
+            try await SystemAudioProbe.play()
+        } catch {
+            await recorder.cancelSignalObservation(observation)
+            throw error
         }
-
-        let received = current.recorder.input.ring.totalSampleCount
-        if received > lastObservedSampleCount {
-            lastObservedSampleCount = received
-            stalledSeconds = 0
-            return
-        }
-
-        stalledSeconds += 1
-        guard stalledSeconds >= Self.stallTolerance else { return }
-        stalledSeconds = 0
-
-        reportRuntimeEvent(
-            runID: runID,
-            message:
-                "The system audio tap stopped delivering samples for \(Self.stallTolerance) seconds.",
-            retryability: .restartable
-        )
-    }
-
-    private func observeRecorderFailure(_ recorder: TrackRecorder, runID: UUID) async {
-        await recorder.observeFailures { [weak self] failure in
-            Task {
-                await self?.reportRuntimeEvent(
-                    runID: runID,
-                    message: failure.localizedDescription,
-                    retryability: .terminal
-                )
-            }
-        }
-    }
-
-    private func reportRuntimeEvent(
-        runID: UUID,
-        message: String,
-        retryability: CaptureRuntimeEvent.Retryability
-    ) {
-        guard current?.run.id == runID, let runtimeEventHandler,
-            reportedRunIDs.insert(runID).inserted
-        else { return }
-        AppLog.capture.error("\(message, privacy: .public)")
-        cancelWatchdog()
-        runtimeEventHandler(
-            CaptureRuntimeEvent(runID: runID, message: message, retryability: retryability))
+        return await recorder.waitForSignal(
+            observation, timeout: SystemAudioProbe.observationTimeout)
     }
 }

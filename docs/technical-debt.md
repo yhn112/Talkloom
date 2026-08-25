@@ -18,15 +18,6 @@ list of finished work buries the open items beside it. Identifiers are never reu
 `open · P2 · code risk` — The format and sample-rate return values are ignored by
 production code and duplicate the final summary. **Exit:** return only what a caller uses.
 
-### D6 — CoreAudio resources have no single owner
-`open · P1 · code risk` — Tap, aggregate-device and IOProc teardown still has no owner that
-retains a resource after its destroy call fails. Acquisition rollback and normal teardown
-now share the Swift handle wrappers and log failures, but the caller discards those wrappers
-afterwards, leaving nothing to retry.
-**Exit:** one resource owner that acquires IDs step by step, destroys them in reverse
-order, logs teardown failures, and stays responsible until cleanup succeeds — replacing the
-duplicated branches rather than wrapping them.
-
 ### D7 — `TrackInput` carries five concerns and a second unchecked escape
 `open · P1 · code risk` — It combines two source APIs, interleaved and deinterleaved
 layouts, generic multichannel averaging, timestamp diagnostics and the ring-buffer handoff,
@@ -36,7 +27,7 @@ measured channel policy, and no generic mixer runs in a real-time callback.
 
 ### D8 — track health is interpreted in four places
 `open · P1 · code risk` — Silence, clipping and near-clipping decisions are made in the
-recorder, the capture actors, controller logs and the UI. Separately, a single peak
+recorder, the capture producers, controller logs and the UI. Separately, a single peak
 threshold cannot establish that a long recording contains speech.
 **Exit:** track health represented once, on a duration-aware measure such as windowed
 activity, and permission state no longer inferred from it.
@@ -71,12 +62,15 @@ every supported macOS version and device, and that two seconds without accepted 
 means the tap is dead. **Exit:** confirmed against a header, or measured across device
 changes.
 
-### D14 — capture actors rely on the controller to serialize lifecycle calls
-`open · P1 · code risk` — Both start a producer, suspend while starting the recorder drain,
-and only then publish the recorder as active. A direct `stop()` during that suspension sees
-no recorder and returns; a second direct `start()` also passes the idle guard.
-**Exit:** `idle`/`starting`/`running`/`stopping` encoded inside each actor, or
-controller-only ownership enforced by the type boundary.
+### D14 — a capture path's reentrancy is guarded by operation ids, not by states
+`open · P1 · code risk` — `TrackCapture` starts a producer, suspends while starting the
+recorder drain, and only then publishes it. A `stop()` or a second `start()` arriving in that
+window is caught by an `operationID` comparison and an `isFinishingSession` flag rather than
+by a state the type makes unrepresentable, so every new suspension point has to remember to
+re-check both. Folding the two capture actors into one moved this from two copies to one,
+which is why it is no longer two defects — not why it is fixed.
+**Exit:** `idle`/`starting`/`running`/`stopping` encoded in `TrackCapture`, so an
+unreachable transition cannot be expressed.
 
 ### D15 — a mic-only fallback assumes the remote side is audible through speakers
 `open · P1 · code risk` — With headphones it is not. The track is labelled `mixed` in

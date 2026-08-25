@@ -44,14 +44,14 @@ extension DeviceTests {
             let capture = SystemAudioCapture()
             let url = directory.appending(path: "system.wav")
 
-            let sampleRate = try await capture.start(writingTo: url)
+            let format = try await capture.start(writingTo: url)
             let playback = DeviceTests.speak()
             try await Task.sleep(for: .seconds(4))
             playback.terminate()
             let summary = try #require(await capture.stop()).summary
             report(summary)
 
-            #expect(sampleRate > 0)
+            #expect(format.sampleRate > 0)
             #expect(abs(summary.duration - 4.0) < 1.0)
             #expect(summary.droppedSampleCount == 0, "the drain loop kept up with the tap")
             #expect(
