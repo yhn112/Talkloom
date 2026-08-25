@@ -89,6 +89,19 @@ session repaired underneath it. The app is a menu-bar singleton, which makes thi
 assumption rather than a reproduced defect. **Exit:** recovery skips a session another
 instance owns, or single-instance is enforced rather than assumed.
 
+### D24 — retrying a failed CoreAudio destroy assumes the handle survived it
+`open · P1 · code risk` — `SystemAudioProducer` keeps a generation whose teardown CoreAudio
+refused and tries again, which assumes a failed `destroyProcessTap` or `destroyAggregateDevice`
+left the object destroyable. No header says that, and `AudioHardwareBase.h:119` says every
+non-zero status is to be treated as the same failure — so nothing distinguishes "still there,
+worth retrying" from "already gone". Destruction is asynchronous even on success
+(`AudioHardware.h:673`), so an error may also report an outcome this call did not cause. The
+retry is capped at three teardowns, which stops an unbounded ledger from becoming the failure
+mode instead of the leak it prevents, but the cap is a hedge, not an answer.
+**Exit:** an experiment on this SDK — destroy an aggregate and a tap twice in a row, and
+destroy a tap while its aggregate is still live, recording the `OSStatus` each time and what
+the tap enumeration shows afterwards — then either drop the retry or justify it.
+
 ## Tooling and tests
 
 ### D18 — `track_compare.py` rejects native-rate masters

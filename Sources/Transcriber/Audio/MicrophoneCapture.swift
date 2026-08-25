@@ -103,9 +103,9 @@ final class MicrophoneProducer: SegmentProducer {
     private var didEnableVoiceProcessing = false
     private var configurationObserver: (any NSObjectProtocol)?
 
-    /// Generations handed out and not yet released. An engine left running would go on
-    /// holding the microphone — and its indicator — after the recorder that asked for it is
-    /// gone, so this producer stays responsible for quieting them.
+    /// Generations handed out and not yet released. `release` quiets them; this list exists
+    /// so that a producer dropped with one still running can say so, which is the only thing
+    /// it is safe to do about it at that point.
     private var outstanding: [Generation] = []
 
     let descriptor = CaptureTrackDescriptor(
@@ -116,14 +116,21 @@ final class MicrophoneProducer: SegmentProducer {
 
     init() {}
 
+    /// Deliberately does not stop the engines.
+    ///
+    /// This runs on whatever thread drops the last reference, and reconfiguring Voice
+    /// Processing IO while everything around it is being torn down is the neighbourhood of the
+    /// reproducible `AVAudioIOUnit::IOUnitPropertyListener` crash `acquire` documents. The
+    /// resource that must not outlive the process is the aggregate device, and that belongs to
+    /// CoreAudio; an engine dies with the process either way. So this reports and stops there.
     deinit {
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
         }
-        for generation in outstanding where generation.isRunning {
+        if outstanding.contains(where: \.isRunning) {
             AppLog.capture.error(
-                "the microphone was dropped without being stopped; quieting its engine")
-            Self.quiet(generation)
+                "the microphone was dropped without being stopped; its engine is left to the process"
+            )
         }
     }
 

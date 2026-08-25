@@ -54,26 +54,21 @@ final class SystemAudioProducer: SegmentProducer {
         var processTap: AudioHardwareTap?
         var aggregateDevice: AudioHardwareAggregateDevice?
         var ioProcID: AudioDeviceIOProcID?
-        let format: AudioStreamBasicDescription
+        var format = AudioStreamBasicDescription()
 
         /// Set when the owner has asked for this generation back. Until then it is live and
         /// must not be swept up by another generation's teardown.
         var isRetired = false
 
+        /// Teardowns CoreAudio has refused for this generation.
+        var releaseAttempts = 0
+
         var isFullyReleased: Bool {
             processTap == nil && aggregateDevice == nil && ioProcID == nil
         }
 
-        init(
-            processTap: AudioHardwareTap?,
-            aggregateDevice: AudioHardwareAggregateDevice?,
-            ioProcID: AudioDeviceIOProcID?,
-            format: AudioStreamBasicDescription
-        ) {
+        init(processTap: AudioHardwareTap) {
             self.processTap = processTap
-            self.aggregateDevice = aggregateDevice
-            self.ioProcID = ioProcID
-            self.format = format
         }
     }
 
@@ -81,6 +76,16 @@ final class SystemAudioProducer: SegmentProducer {
     /// off the tap produces frames continuously, silence included, so a gap this long is
     /// not a quiet moment — it is a stopped stream.
     private static let stallTolerance = 2
+
+    /// How many teardowns one generation may refuse before it is abandoned.
+    ///
+    /// Retrying at all rests on a premise CoreAudio does not state: that a destroy which
+    /// returned an error left the object destroyable. `AudioHardwareBase.h` says the opposite
+    /// in spirit — every non-zero status is to be treated as the same failure — so nothing
+    /// here can tell "still there" from "already gone". A ledger that retried forever would
+    /// replace the leak it prevents with one of its own. D24 records the experiment that
+    /// would settle it.
+    private static let releaseAttemptLimit = 3
 
     /// The IO block is dispatched onto this queue. The header is explicit that IO blocks
     /// are dispatched *synchronously*, so this is still a real-time context — the queue
@@ -129,7 +134,6 @@ final class SystemAudioProducer: SegmentProducer {
         sweepRetired(context: "before acquiring a system audio tap")
 
         let generation = try createTap()
-        outstanding.append(generation)
         let format = SegmentFormat(
             sampleRate: generation.format.mSampleRate,
             channelCount: generation.format.mChannelsPerFrame
@@ -193,9 +197,19 @@ final class SystemAudioProducer: SegmentProducer {
     /// tap that is already recording again.
     private func sweepRetired(context: String) {
         for generation in outstanding where generation.isRetired {
+            generation.releaseAttempts += 1
             Self.destroy(generation, context: context)
+            guard !generation.isFullyReleased,
+                generation.releaseAttempts >= Self.releaseAttemptLimit
+            else { continue }
+            AppLog.capture.error(
+                "\(context, privacy: .public): a system audio resource refused \(Self.releaseAttemptLimit, privacy: .public) teardowns and is being abandoned"
+            )
         }
-        outstanding.removeAll { $0.isRetired && $0.isFullyReleased }
+        outstanding.removeAll {
+            $0.isRetired
+                && ($0.isFullyReleased || $0.releaseAttempts >= Self.releaseAttemptLimit)
+        }
         let held = outstanding.filter(\.isRetired).count
         if held > 0 {
             AppLog.capture.error(
@@ -319,12 +333,16 @@ final class SystemAudioProducer: SegmentProducer {
             throw Failure.tapCreationFailed(Self.describe(error))
         }
 
+        // In the ledger from the moment it exists. Rolling back through `release` is what
+        // makes the rollback obey the same rule as every other teardown: a handle the system
+        // refuses is kept and retried, never logged and dropped.
+        let generation = Generation(processTap: processTap)
+        outstanding.append(generation)
         do {
             // Read the format the tap actually reports rather than assuming one. Assuming
             // here is what produces a valid file full of silence.
-            let format: AudioStreamBasicDescription
             do {
-                format = try processTap.format
+                generation.format = try processTap.format
             } catch {
                 throw Failure.tapFormatUnavailable(Self.describe(error))
             }
@@ -334,15 +352,10 @@ final class SystemAudioProducer: SegmentProducer {
             } catch {
                 throw Failure.tapUIDUnavailable(Self.describe(error))
             }
-            let aggregateDevice = try createAggregate(around: tapUID)
-            return Generation(
-                processTap: processTap,
-                aggregateDevice: aggregateDevice,
-                ioProcID: nil,
-                format: format
-            )
+            generation.aggregateDevice = try createAggregate(around: tapUID)
+            return generation
         } catch {
-            Self.destroyProcessTap(processTap, context: "rolling back tap creation")
+            release(generation, context: "rolling back tap creation")
             throw error
         }
     }
