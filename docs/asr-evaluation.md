@@ -47,6 +47,16 @@ The current measured no-VAD comparator is recorded in
 [`Tests/reports/baseline.md`](../Tests/reports/baseline.md). It is the baseline for the VAD
 experiment, not a claim about real-meeting quality.
 
+## A reference is only as good as its provenance
+
+A fixture's reference text has to be traceable to people who wrote it down, and that has to be
+checked before any number is quoted from it. A corpus whose transcripts were produced by an ASR
+model — or whose production is simply undocumented — can still be used to compare two engines
+against each other, because both are wrong against the same text. It cannot be used to say what
+either engine's word error rate is. `Tests/reports/baseline.md` records which corpora were
+checked and what was found; two of them turned out to state their human transcription process
+in detail and one turned out to state nothing at all.
+
 ## A tiered engine is a candidate, not a decision
 
 The measured engines fail in different places: the cloud one invents speech on silence and
