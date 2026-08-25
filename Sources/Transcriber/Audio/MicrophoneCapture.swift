@@ -124,12 +124,12 @@ actor MicrophoneCapture {
         )
         let trackInput = recorder.input
         input.installTap(onBus: 0, bufferSize: Self.tapBufferSize, format: format) { buffer, when in
-            // Real-time context: a timestamp store and a copy into a preallocated ring
-            // buffer, nothing else.
-            if when.isHostTimeValid {
-                trackInput.noteFirstHostTime(when.hostTime)
-            }
-            trackInput.write(buffer)
+            // Real-time context: one coordinated timestamp/boundary/sample handoff into
+            // preallocated SPSC rings, nothing else.
+            trackInput.write(
+                buffer,
+                atHostTime: when.isHostTimeValid ? when.hostTime : nil
+            )
         }
 
         engine.prepare()

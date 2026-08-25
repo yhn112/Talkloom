@@ -20,8 +20,18 @@ final class TrackInput: @unchecked Sendable {
 
     private let scratch: UnsafeMutablePointer<Float>
     private let scratchCapacity: Int
+    private let boundaries: TimelineBoundaryRing
 
-    /// Mach host time of the first block this track received, or 0 if none has arrived.
+    /// Producer-only state. The callback is the single writer required by the SPSC rings,
+    /// so these values need no synchronization and must never be touched by the consumer.
+    private var needsBoundary = true
+    private var pendingDroppedFrameCount = 0
+
+    /// The recorder reads these from its actor while the callback may still be running.
+    private let didObserveTimeline = Atomic<Bool>(false)
+    private let timelineIsComplete = Atomic<Bool>(true)
+
+    /// Mach host time represented by frame zero of the master, or 0 if none has arrived.
     ///
     /// This is the track's time origin, and it is recorded rather than assumed. Both
     /// capture paths hand over a mach timestamp taken by the audio hardware, and mach time
@@ -42,6 +52,10 @@ final class TrackInput: @unchecked Sendable {
     ///     dropped rather than truncated, so size it generously.
     init(ringCapacity: Int, maximumFrameCount: Int = 16_384) {
         ring = AudioRingBuffer(capacity: ringCapacity)
+        // One boundary needs at least one accepted sample before another can follow. Giving
+        // the sparse side ring the sample ring's capacity therefore makes metadata capacity
+        // at least as large as the number of unresolved boundaries it can accompany.
+        boundaries = TimelineBoundaryRing(capacity: ring.capacity)
         scratchCapacity = maximumFrameCount
         scratch = .allocate(capacity: maximumFrameCount)
         scratch.initialize(repeating: 0, count: maximumFrameCount)
@@ -50,13 +64,6 @@ final class TrackInput: @unchecked Sendable {
     deinit {
         scratch.deinitialize(count: scratchCapacity)
         scratch.deallocate()
-    }
-
-    /// Records the timestamp of the first block, ignoring every one after it. Real-time
-    /// safe: one uncontended compare-exchange that succeeds exactly once per recording.
-    func noteFirstHostTime(_ hostTime: UInt64) {
-        guard hostTime != 0 else { return }
-        _ = firstHostTime.compareExchange(expected: 0, desired: hostTime, ordering: .relaxed)
     }
 
     /// How many blocks were refused for arriving in an unexpected buffer layout.
@@ -68,11 +75,27 @@ final class TrackInput: @unchecked Sendable {
         return (Int(shape >> 48), Int((shape >> 32) & 0xFFFF), Int(shape & 0xFFFF_FFFF))
     }
 
-    /// When the first sample arrived, or `nil` if the track never received one.
+    /// Hardware time represented by frame zero, or `nil` if the timeline is unknown.
     var firstSampleHostTime: UInt64? {
+        guard hasCompleteTimeline else { return nil }
         let value = firstHostTime.load(ordering: .relaxed)
         return value == 0 ? nil : value
     }
+
+    /// Whether every written or replaced block had a hardware anchor and the drop counter
+    /// remained representable. Direct access to `ring` is deliberately treated as unknown.
+    var hasCompleteTimeline: Bool {
+        didObserveTimeline.load(ordering: .relaxed)
+            && timelineIsComplete.load(ordering: .relaxed)
+    }
+
+    /// Consumer-side boundary read. The recorder first acquires the audio write cursor, then
+    /// calls this, matching the producer's boundary-before-audio publication order.
+    func readBoundary() -> TimelineBoundary? { boundaries.read() }
+
+    /// Any final rejected blocks after the last accepted span. The producer must already be
+    /// stopped before the recorder asks for this value.
+    func terminalDroppedFrameCount() -> Int { pendingDroppedFrameCount }
 
     /// Samples the producer had to throw away, either because the consumer fell behind or
     /// because a block was larger than the scratch buffer.
@@ -80,16 +103,25 @@ final class TrackInput: @unchecked Sendable {
 
     /// Accepts a block from an `AVAudioNodeTapBlock`.
     @discardableResult
-    func write(_ buffer: AVAudioPCMBuffer) -> Bool {
+    func write(_ buffer: AVAudioPCMBuffer, atHostTime hostTime: UInt64? = nil) -> Bool {
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0, let channels = buffer.floatChannelData else { return true }
 
         let channelCount = Int(buffer.format.channelCount)
         if buffer.format.isInterleaved {
             return write(
-                interleaved: channels[0], frameCount: frameCount, channelCount: channelCount)
+                interleaved: channels[0],
+                frameCount: frameCount,
+                channelCount: channelCount,
+                hostTime: hostTime
+            )
         }
-        return write(deinterleaved: channels, frameCount: frameCount, channelCount: channelCount)
+        return write(
+            deinterleaved: channels,
+            frameCount: frameCount,
+            channelCount: channelCount,
+            hostTime: hostTime
+        )
     }
 
     /// Accepts a block from an `AudioDeviceIOBlock`.
@@ -103,7 +135,10 @@ final class TrackInput: @unchecked Sendable {
     /// audio, and neither showed up as an error anywhere. Refusing the block instead turns
     /// a misconfigured device into missing samples, which is counted and visible.
     @discardableResult
-    func write(_ bufferList: UnsafePointer<AudioBufferList>) -> Bool {
+    func write(
+        _ bufferList: UnsafePointer<AudioBufferList>,
+        atHostTime hostTime: UInt64? = nil
+    ) -> Bool {
         let buffers = UnsafeMutableAudioBufferListPointer(
             UnsafeMutablePointer(mutating: bufferList))
         guard let first = buffers.first else { return true }
@@ -124,19 +159,33 @@ final class TrackInput: @unchecked Sendable {
         return write(
             interleaved: data.assumingMemoryBound(to: Float.self),
             frameCount: Int(first.mDataByteSize) / (MemoryLayout<Float>.size * channelCount),
-            channelCount: channelCount
+            channelCount: channelCount,
+            hostTime: hostTime
         )
+    }
+
+    /// Accepts already-mono samples. Used by deterministic tests and by the downmix paths.
+    @discardableResult
+    func write(
+        _ samples: UnsafePointer<Float>,
+        count: Int,
+        atHostTime hostTime: UInt64?
+    ) -> Bool {
+        writeMono(samples, frameCount: count, hostTime: hostTime)
     }
 
     private func write(
         interleaved samples: UnsafePointer<Float>,
         frameCount: Int,
-        channelCount: Int
+        channelCount: Int,
+        hostTime: UInt64?
     ) -> Bool {
         guard frameCount > 0 else { return true }
-        guard channelCount > 1 else { return ring.write(samples, count: frameCount) }
+        guard channelCount > 1 else {
+            return writeMono(samples, frameCount: frameCount, hostTime: hostTime)
+        }
         guard frameCount <= scratchCapacity else {
-            ring.recordDrop(sampleCount: frameCount)
+            recordDrop(frameCount: frameCount, hostTime: hostTime)
             return false
         }
 
@@ -148,17 +197,20 @@ final class TrackInput: @unchecked Sendable {
             }
             scratch[frame] = sum * scale
         }
-        return ring.write(scratch, count: frameCount)
+        return writeMono(scratch, frameCount: frameCount, hostTime: hostTime)
     }
 
     private func write(
         deinterleaved channels: UnsafePointer<UnsafeMutablePointer<Float>>,
         frameCount: Int,
-        channelCount: Int
+        channelCount: Int,
+        hostTime: UInt64?
     ) -> Bool {
-        guard channelCount > 1 else { return ring.write(channels[0], count: frameCount) }
+        guard channelCount > 1 else {
+            return writeMono(channels[0], frameCount: frameCount, hostTime: hostTime)
+        }
         guard frameCount <= scratchCapacity else {
-            ring.recordDrop(sampleCount: frameCount)
+            recordDrop(frameCount: frameCount, hostTime: hostTime)
             return false
         }
 
@@ -173,6 +225,68 @@ final class TrackInput: @unchecked Sendable {
         for frame in 0..<frameCount {
             scratch[frame] *= scale
         }
-        return ring.write(scratch, count: frameCount)
+        return writeMono(scratch, frameCount: frameCount, hostTime: hostTime)
+    }
+
+    /// Publishes a span boundary before the first accepted block in that span, then the
+    /// samples. The consumer acquires those cursors in the opposite order, so it cannot read
+    /// across a gap before seeing the boundary that describes it.
+    private func writeMono(
+        _ samples: UnsafePointer<Float>,
+        frameCount: Int,
+        hostTime: UInt64?
+    ) -> Bool {
+        guard frameCount > 0 else { return true }
+        didObserveTimeline.store(true, ordering: .relaxed)
+        let validHostTime = hostTime.flatMap { $0 == 0 ? nil : $0 }
+        if validHostTime == nil { timelineIsComplete.store(false, ordering: .relaxed) }
+
+        guard ring.canWrite(sampleCount: frameCount) else {
+            recordDrop(frameCount: frameCount, hostTime: validHostTime)
+            return false
+        }
+        guard !needsBoundary || boundaries.canWrite else {
+            recordDrop(frameCount: frameCount, hostTime: validHostTime)
+            return false
+        }
+
+        if needsBoundary {
+            boundaries.write(
+                TimelineBoundary(
+                    sourceFrameOffset: ring.totalSampleCount,
+                    startHostTime: validHostTime ?? 0,
+                    silentFrameCount: pendingDroppedFrameCount
+                ))
+        }
+
+        // The preflight cannot become false: this is the only producer, and the consumer can
+        // only free room. A failure here would mean the SPSC contract was violated.
+        precondition(ring.write(samples, count: frameCount))
+
+        if let validHostTime, timelineIsComplete.load(ordering: .relaxed) {
+            _ = firstHostTime.compareExchange(
+                expected: 0, desired: validHostTime, ordering: .relaxed)
+        }
+        needsBoundary = false
+        pendingDroppedFrameCount = 0
+        return true
+    }
+
+    private func recordDrop(frameCount: Int, hostTime: UInt64?) {
+        didObserveTimeline.store(true, ordering: .relaxed)
+        if hostTime == nil { timelineIsComplete.store(false, ordering: .relaxed) }
+        if let hostTime, timelineIsComplete.load(ordering: .relaxed) {
+            _ = firstHostTime.compareExchange(
+                expected: 0, desired: hostTime, ordering: .relaxed)
+        }
+        ring.recordDrop(sampleCount: frameCount)
+        let (total, overflow) = pendingDroppedFrameCount.addingReportingOverflow(frameCount)
+        if overflow {
+            pendingDroppedFrameCount = Int.max
+            timelineIsComplete.store(false, ordering: .relaxed)
+        } else {
+            pendingDroppedFrameCount = total
+        }
+        needsBoundary = true
     }
 }

@@ -137,7 +137,14 @@ struct RecordingControllerTests {
                 frameCount: frameCount,
                 peakAmplitude: peakAmplitude,
                 droppedSampleCount: 0,
-                firstSampleHostTime: 1_000
+                firstSampleHostTime: 1_000,
+                spans: [
+                    TrackReport.Span(
+                        fileFrameOffset: 0,
+                        frameCount: frameCount,
+                        startHostTime: 1_000
+                    )
+                ]
             ),
             failure: failure
         )

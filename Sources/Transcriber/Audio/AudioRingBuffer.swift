@@ -4,7 +4,7 @@ import Synchronization
 ///
 /// This is the hand-off between an audio callback and everything else. The producer is a
 /// real-time thread — an `AudioDeviceIOProc` or an `AVAudioNodeTapBlock` — which may not
-/// allocate, lock, or wait; the consumer is an ordinary task that resamples and writes to
+/// allocate, lock, or wait; the consumer is an ordinary task that converts and writes to
 /// disk. `write` and `read` therefore never block and never allocate, and the storage is
 /// sized once, up front.
 ///
@@ -77,6 +77,17 @@ final class AudioRingBuffer: @unchecked Sendable {
         _ = droppedCursor.wrappingAdd(sampleCount, ordering: .relaxed)
     }
 
+    /// Producer-side preflight for a compound audio-plus-boundary write.
+    ///
+    /// There is one producer, and the consumer can only advance `readCursor`, so a successful
+    /// check stays successful until that producer publishes the block.
+    func canWrite(sampleCount: Int) -> Bool {
+        guard sampleCount >= 0 else { return false }
+        let writeIndex = writeCursor.load(ordering: .relaxed)
+        let readIndex = readCursor.load(ordering: .acquiring)
+        return capacity - (writeIndex - readIndex) >= sampleCount
+    }
+
     /// Copies `count` samples in. Real-time safe: no allocation, no locks, no ARC.
     ///
     /// Returns `false` and drops the entire block when there is not enough room. Dropping
@@ -86,8 +97,7 @@ final class AudioRingBuffer: @unchecked Sendable {
     func write(_ source: UnsafePointer<Float>, count: Int) -> Bool {
         guard count > 0 else { return true }
         let writeIndex = writeCursor.load(ordering: .relaxed)
-        let readIndex = readCursor.load(ordering: .acquiring)
-        guard capacity - (writeIndex - readIndex) >= count else {
+        guard canWrite(sampleCount: count) else {
             _ = droppedCursor.wrappingAdd(count, ordering: .relaxed)
             return false
         }

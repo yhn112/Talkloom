@@ -78,6 +78,17 @@ extension DeviceTests {
             #expect(manifest.tracks.first { $0.file == "mic.wav" }?.content == .local)
             #expect(manifest.tracks.first { $0.file == "system.wav" }?.content == .remote)
             #expect(manifest.warning == nil, "neither path was degraded")
+            for track in manifest.tracks {
+                let spans = try #require(track.spans)
+                #expect(spans.count == 1)
+                let span = try #require(spans.first)
+                #expect(span.fileFrameOffset == 0)
+                #expect(span.frameCount == track.frameCount)
+                #expect(track.gaps?.isEmpty == true)
+                print(
+                    "  \(track.file): one continuous span, \(span.frameCount) frames, no gaps"
+                )
+            }
             // The system tap produces its first sample almost at once; voice processing
             // takes the best part of a second to come up. The gap is accepted, but it has to
             // be written down, because nothing in the audio records it.

@@ -221,7 +221,12 @@ final class TrackRecorderTests {
             sampleRate: 48_000,
             content: .remote
         )
-        recorder.input.noteFirstHostTime(1_234)
+        [Float](repeating: 0.25, count: 4).withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: 1_234
+                ))
+        }
 
         let reported = await withCheckedContinuation {
             (continuation: CheckedContinuation<UInt64, Never>) in
@@ -283,35 +288,172 @@ final class TrackRecorderTests {
         _ = await recorder.finish()
     }
 
-    /// A drop is not a rounding error in the length. Whatever arrives afterwards is written
-    /// directly behind what came before, so this track shortens and shifts against the
-    /// other one, and `session.json` cannot yet say where the gap was. The track fails
-    /// instead, and nothing from the pass that noticed reaches disk.
-    @Test("dropped samples fail the track instead of compressing its timeline")
-    func droppedSamplesFailTheTrack() async throws {
+    /// A refused block is materialized as native-rate silence between two anchored spans.
+    /// The real samples after it remain in the file instead of stopping the whole meeting or
+    /// being appended directly behind the earlier span and compressing the timeline.
+    @Test("dropped samples become an explicit silent gap and recording continues")
+    func droppedSamplesBecomeAnExplicitSilentGap() async throws {
         // 8 kHz gives four seconds of ring in 32 768 samples, so one oversized block
         // overflows it without having to stall the consumer.
+        let url = directory.appending(path: "dropped.wav")
         let recorder = try TrackRecorder(
             label: "system",
-            url: directory.appending(path: "dropped.wav"),
+            url: url,
             sampleRate: 8_000,
             content: .remote
         )
+        let origin: UInt64 = 1_000_000
         [Float](repeating: 0.5, count: 1_000).withUnsafeBufferPointer {
-            _ = recorder.input.ring.write($0.baseAddress!, count: $0.count)
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: origin
+                ))
         }
         let overflowed = [Float](repeating: 0.5, count: 40_000).withUnsafeBufferPointer {
-            recorder.input.ring.write($0.baseAddress!, count: $0.count)
+            recorder.input.write(
+                $0.baseAddress!,
+                count: $0.count,
+                atHostTime: origin + HostTime.hostTicks(forSeconds: 0.125)
+            )
         }
         #expect(!overflowed)
 
-        let failure = await firstReportedFailure(from: recorder)
+        await recorder.start()
+        try await Task.sleep(for: .milliseconds(100))
+        [Float](repeating: -0.5, count: 1_000).withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 5.125)
+                ))
+        }
         let completion = await recorder.finish()
 
-        #expect(failure == .samplesDropped(label: "system", sampleCount: 40_000))
-        #expect(completion.failure == .samplesDropped(label: "system", sampleCount: 40_000))
+        #expect(completion.failure == nil)
         #expect(completion.summary.droppedSampleCount == 40_000)
-        #expect(completion.summary.frameCount == 0)
+        #expect(completion.summary.frameCount == 42_000)
+        #expect(completion.summary.firstSampleHostTime == origin)
+        #expect(
+            completion.summary.spans == [
+                .init(fileFrameOffset: 0, frameCount: 1_000, startHostTime: origin),
+                .init(
+                    fileFrameOffset: 41_000,
+                    frameCount: 1_000,
+                    startHostTime: origin + HostTime.hostTicks(forSeconds: 5.125)
+                ),
+            ])
+
+        let data = try Data(contentsOf: url)
+        let written = data.dropFirst(44).withUnsafeBytes { raw in
+            (0..<42_000).map {
+                Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self))
+            }
+        }
+        #expect(written[0] > 0)
+        #expect(written[999] > 0)
+        #expect(written[1_000..<41_000].allSatisfy { $0 == 0 })
+        #expect(written[41_000] < 0)
+        #expect(written[41_999] < 0)
+    }
+
+    @Test("multiple gaps queued before one drain preserve every boundary")
+    func multipleGapsQueuedBeforeOneDrainPreserveEveryBoundary() async throws {
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "multiple-gaps.wav"),
+            sampleRate: 100,
+            content: .remote
+        )
+        let origin: UInt64 = 1_000_000
+        let accepted = [Float](repeating: 0.5, count: 10)
+        let dropped = [Float](repeating: 0.5, count: 600)
+
+        accepted.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: origin
+                ))
+        }
+        dropped.withUnsafeBufferPointer {
+            #expect(
+                !recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 0.1)
+                ))
+        }
+        accepted.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 6.1)
+                ))
+        }
+        dropped.withUnsafeBufferPointer {
+            #expect(
+                !recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 6.2)
+                ))
+        }
+        accepted.withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 12.2)
+                ))
+        }
+
+        let completion = await recorder.finish()
+
+        #expect(completion.failure == nil)
+        #expect(completion.summary.frameCount == 1_230)
+        #expect(completion.summary.droppedSampleCount == 1_200)
+        #expect(completion.summary.spans?.map(\.fileFrameOffset) == [0, 610, 1_220])
+        #expect(completion.summary.spans?.map(\.frameCount) == [10, 10, 10])
+    }
+
+    @Test("an initial dropped block becomes silence before the first real span")
+    func anInitialDroppedBlockBecomesSilenceBeforeTheFirstRealSpan() async throws {
+        let recorder = try TrackRecorder(
+            label: "system",
+            url: directory.appending(path: "initial-gap.wav"),
+            sampleRate: 100,
+            content: .remote
+        )
+        let origin: UInt64 = 1_000_000
+        [Float](repeating: 0.5, count: 600).withUnsafeBufferPointer {
+            #expect(
+                !recorder.input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: origin
+                ))
+        }
+        [Float](repeating: 0.5, count: 10).withUnsafeBufferPointer {
+            #expect(
+                recorder.input.write(
+                    $0.baseAddress!,
+                    count: $0.count,
+                    atHostTime: origin + HostTime.hostTicks(forSeconds: 6)
+                ))
+        }
+
+        let completion = await recorder.finish()
+
+        #expect(completion.failure == nil)
+        #expect(completion.summary.firstSampleHostTime == origin)
+        #expect(completion.summary.frameCount == 610)
+        #expect(
+            completion.summary.spans == [
+                .init(
+                    fileFrameOffset: 600,
+                    frameCount: 10,
+                    startHostTime: origin + HostTime.hostTicks(forSeconds: 6)
+                )
+            ])
     }
 
     /// The producer's downmix. Whatever the device hands over, one averaged channel comes
@@ -421,5 +563,43 @@ final class TrackRecorderTests {
         #expect(!input.write(buffer))
         #expect(input.droppedSampleCount == 16)
         #expect(input.ring.availableToRead == 0)
+    }
+
+    @Test("a full boundary ring refuses unmarked audio")
+    func aFullBoundaryRingRefusesUnmarkedAudio() {
+        let input = TrackInput(ringCapacity: 4)
+        let accepted = [Float](repeating: 0.5, count: 1)
+        let dropped = [Float](repeating: 0.5, count: 5)
+        var sink: Float = 0
+
+        for index in 0..<4 {
+            accepted.withUnsafeBufferPointer {
+                #expect(
+                    input.write(
+                        $0.baseAddress!,
+                        count: $0.count,
+                        atHostTime: UInt64(1_000 + index * 10)
+                    ))
+            }
+            #expect(input.ring.read(into: &sink, count: 1) == 1)
+            dropped.withUnsafeBufferPointer {
+                #expect(
+                    !input.write(
+                        $0.baseAddress!,
+                        count: $0.count,
+                        atHostTime: UInt64(1_001 + index * 10)
+                    ))
+            }
+        }
+
+        accepted.withUnsafeBufferPointer {
+            #expect(
+                !input.write(
+                    $0.baseAddress!, count: $0.count, atHostTime: 2_000
+                ))
+        }
+
+        #expect(input.ring.availableToRead == 0)
+        #expect(input.droppedSampleCount == 21)
     }
 }

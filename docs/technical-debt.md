@@ -22,15 +22,6 @@ those sources can disagree.
 
 ## P0 — a truthful timeline
 
-### D4 — a dropped block costs the rest of the meeting
-`interim policy · P0 · reproduced` — Shown by the existing ring-buffer and oversized-block
-tests. A drop now fails the track and stops the session (`TrackRecorder.drain`), so no
-`completed` manifest can describe a compressed timeline; the price is that one dropped
-block ends the session, violating the Stage 1 continuity requirement in `PLAN.md`.
-**Exit:** a timeline of spans with their own host-time anchors locates the drop, the writer
-inserts the exact number of silent frames and continues, and the completed manifest makes
-the gap observable — the same representation D23 needs.
-
 ### D23 — a capture-path restart must preserve wall-clock time
 `open · P0 · confirmed fact` — Capture currently stops and finalizes the whole session when
 either path dies, which violates the Stage 1 continuity requirement in `PLAN.md`. A simple

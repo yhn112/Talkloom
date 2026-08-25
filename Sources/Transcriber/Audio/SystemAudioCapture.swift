@@ -308,12 +308,13 @@ actor SystemAudioCapture {
         let createStatus = AudioDeviceCreateIOProcIDWithBlock(
             &ioProcID, tap.aggregateDevice.id, ioQueue
         ) { _, inputData, inputTime, _, _ in
-            // Real-time context: a timestamp store and a copy into a preallocated ring
-            // buffer, nothing else.
-            if inputTime.pointee.mFlags.contains(.hostTimeValid) {
-                trackInput.noteFirstHostTime(inputTime.pointee.mHostTime)
-            }
-            trackInput.write(inputData)
+            // Real-time context: one coordinated timestamp/boundary/sample handoff into
+            // preallocated SPSC rings, nothing else.
+            trackInput.write(
+                inputData,
+                atHostTime: inputTime.pointee.mFlags.contains(.hostTimeValid)
+                    ? inputTime.pointee.mHostTime : nil
+            )
         }
         guard createStatus == noErr, let ioProcID else {
             throw Failure.ioProcCreationFailed(Self.describe(createStatus))

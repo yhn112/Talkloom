@@ -21,6 +21,23 @@ struct RecordingManifestTests {
         )
     }
 
+    private func report(
+        _ label: String,
+        frameCount: Int,
+        spans: [TrackReport.Span]
+    ) -> TrackReport {
+        TrackReport(
+            file: "\(label).wav",
+            content: .remote,
+            sampleRate: 48_000,
+            frameCount: frameCount,
+            peakAmplitude: 0.5,
+            droppedSampleCount: frameCount - spans.reduce(0) { $0 + $1.frameCount },
+            spans: spans,
+            firstSampleHostTime: spans.first?.startHostTime
+        )
+    }
+
     /// Writes the manifest to a fresh directory, reads it back, and hands over what the
     /// file actually said — which is the only version that matters months later.
     private func roundTrip(_ manifest: RecordingManifest) throws -> RecordingManifest {
@@ -69,6 +86,73 @@ struct RecordingManifestTests {
         let system = try #require(manifest.tracks.first { $0.file == "system.wav" })
         #expect(system.startOffset == nil)
         #expect(try #require(manifest.tracks.first { $0.file == "mic.wav" }).startOffset == 0)
+    }
+
+    /// The master contains the silence, while the spans say which frames came from the
+    /// source and where each uninterrupted run belongs on the common hardware clock.
+    @Test("anchored spans make an inserted gap explicit")
+    func anchoredSpansMakeAnInsertedGapExplicit() throws {
+        let origin: UInt64 = 1_000
+        let second = HostTime.hostTicks(forSeconds: 1)
+        let manifest = RecordingManifest(
+            startedAt: Date(timeIntervalSince1970: 0),
+            reports: [
+                report(
+                    "system",
+                    frameCount: 120_000,
+                    spans: [
+                        .init(fileFrameOffset: 0, frameCount: 48_000, startHostTime: origin),
+                        .init(
+                            fileFrameOffset: 72_000,
+                            frameCount: 48_000,
+                            startHostTime: origin + second + second / 2
+                        ),
+                    ]
+                )
+            ]
+        )
+
+        let track = try #require(manifest.tracks.first)
+        #expect(track.spans?.count == 2)
+        #expect(track.startOffset == 0)
+        #expect(track.spans?[0].startOffset == 0)
+        #expect(abs(try #require(track.spans?[1].startOffset) - 1.5) < 0.001)
+        #expect(track.gaps?.count == 1)
+        #expect(track.gaps?.first?.fileFrameOffset == 48_000)
+        #expect(track.gaps?.first?.frameCount == 24_000)
+        #expect(track.gaps?.first?.duration == 0.5)
+        #expect(try roundTrip(manifest) == manifest)
+    }
+
+    @Test("an initial dropped block precedes the first real span")
+    func anInitialDroppedBlockPrecedesTheFirstRealSpan() throws {
+        let origin: UInt64 = 1_000
+        let halfSecond = HostTime.hostTicks(forSeconds: 0.5)
+        let report = TrackReport(
+            file: "system.wav",
+            content: .remote,
+            sampleRate: 48_000,
+            frameCount: 72_000,
+            peakAmplitude: 0.5,
+            droppedSampleCount: 24_000,
+            spans: [
+                .init(
+                    fileFrameOffset: 24_000,
+                    frameCount: 48_000,
+                    startHostTime: origin + halfSecond)
+            ],
+            firstSampleHostTime: origin
+        )
+
+        let track = try #require(
+            RecordingManifest(
+                startedAt: Date(timeIntervalSince1970: 0), reports: [report]
+            ).tracks.first)
+
+        #expect(track.startOffset == 0)
+        #expect(abs(try #require(track.spans?.first?.startOffset) - 0.5) < 0.001)
+        #expect(track.gaps?.first?.fileFrameOffset == 0)
+        #expect(track.gaps?.first?.frameCount == 24_000)
     }
 
     @Test("it round trips through the file it writes")
@@ -205,6 +289,38 @@ struct RecordingManifestTests {
         #expect(manifest.warning == nil)
         #expect(manifest.trackStarts.isEmpty)
         #expect(manifest.tracks.allSatisfy { $0.content == nil })
+        #expect(manifest.tracks.allSatisfy { $0.spans == nil })
+        #expect(manifest.tracks.allSatisfy { $0.gaps == nil })
+    }
+
+    @Test("a legacy start offset becomes one continuous span")
+    func aLegacyStartOffsetBecomesOneContinuousSpan() throws {
+        let json = """
+            {
+              "startedAt": "2023-11-14T22:13:20Z",
+              "status": "completed",
+              "tracks": [
+                {
+                  "file": "mic.wav",
+                  "sampleRate": 48000,
+                  "frameCount": 48000,
+                  "startOffset": 0.75
+                }
+              ]
+            }
+            """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let manifest = try decoder.decode(RecordingManifest.self, from: Data(json.utf8))
+        let track = try #require(manifest.tracks.first)
+
+        #expect(track.startOffset == 0.75)
+        #expect(
+            track.spans == [
+                .init(startOffset: 0.75, fileFrameOffset: 0, frameCount: 48_000)
+            ])
+        #expect(track.gaps?.isEmpty == true)
     }
 
     /// A manifest shape written by an older version of the app.

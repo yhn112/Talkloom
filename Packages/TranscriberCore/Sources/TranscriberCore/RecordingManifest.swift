@@ -21,6 +21,45 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     }
 
     public struct Track: Codable, Equatable, Sendable {
+        /// One uninterrupted run of captured samples in the master file.
+        ///
+        /// `startOffset` is derived from the span's hardware host-time anchor and is relative
+        /// to the earliest master start in the session. `fileFrameOffset` includes any
+        /// native-rate silence inserted before this span, so the encoded spans and the track's
+        /// total `frameCount` make every leading, intermediate and trailing gap unambiguous.
+        public struct Span: Codable, Equatable, Sendable {
+            public let startOffset: TimeInterval
+            public let fileFrameOffset: Int
+            public let frameCount: Int
+
+            public init(
+                startOffset: TimeInterval,
+                fileFrameOffset: Int,
+                frameCount: Int
+            ) {
+                self.startOffset = startOffset
+                self.fileFrameOffset = fileFrameOffset
+                self.frameCount = frameCount
+            }
+        }
+
+        /// Native-rate silence in the master. This is derived from the encoded span
+        /// boundaries rather than stored a second time in `session.json`.
+        public struct Gap: Equatable, Sendable {
+            public let fileFrameOffset: Int
+            public let frameCount: Int
+
+            public var duration: TimeInterval { Double(frameCount) / sampleRate }
+
+            private let sampleRate: Double
+
+            fileprivate init(fileFrameOffset: Int, frameCount: Int, sampleRate: Double) {
+                self.fileFrameOffset = fileFrameOffset
+                self.frameCount = frameCount
+                self.sampleRate = sampleRate
+            }
+        }
+
         public let file: String
         public let sampleRate: Double
         public let frameCount: Int
@@ -37,15 +76,122 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
 
         public let failure: String?
 
-        /// Seconds from the recording's origin — the earliest first sample of any track —
-        /// to this track's first sample. `nil` means the track never received a sample.
+        /// Measured uninterrupted sample runs. `nil` means an older or recovered recording
+        /// did not preserve enough information to distinguish audio from gaps.
+        public let spans: [Span]?
+
+        /// Seconds from the session origin to frame zero of this master. It can precede the
+        /// first real span when an initial dropped block was replaced with silence.
         public let startOffset: TimeInterval?
+
+        /// Every region of native-rate silence not covered by a measured span.
+        ///
+        /// `nil` means the span topology is unknown. An empty array means it was measured
+        /// and the master is continuous.
+        public var gaps: [Gap]? {
+            guard let spans else { return nil }
+            var result: [Gap] = []
+            var nextFrame = 0
+            for span in spans {
+                if span.fileFrameOffset > nextFrame {
+                    result.append(
+                        Gap(
+                            fileFrameOffset: nextFrame,
+                            frameCount: span.fileFrameOffset - nextFrame,
+                            sampleRate: sampleRate
+                        ))
+                }
+                nextFrame = max(nextFrame, span.fileFrameOffset + span.frameCount)
+            }
+            if frameCount > nextFrame {
+                result.append(
+                    Gap(
+                        fileFrameOffset: nextFrame,
+                        frameCount: frameCount - nextFrame,
+                        sampleRate: sampleRate
+                    ))
+            }
+            return result
+        }
 
         /// Who is on the track. `nil` only in manifests written before the field existed,
         /// and in recovered sessions: for those recordings it is genuinely unknown, and
         /// guessing from the file name would reintroduce exactly the claim this field was
         /// added to stop making.
         public let content: TrackContent?
+
+        private enum CodingKeys: String, CodingKey {
+            case file
+            case sampleRate
+            case frameCount
+            case peakAmplitude
+            case droppedSampleCount
+            case failure
+            case spans
+            case startOffset
+            case content
+        }
+
+        fileprivate init(
+            file: String,
+            sampleRate: Double,
+            frameCount: Int,
+            peakAmplitude: Float?,
+            droppedSampleCount: Int?,
+            failure: String?,
+            spans: [Span]?,
+            startOffset: TimeInterval?,
+            content: TrackContent?
+        ) {
+            self.file = file
+            self.sampleRate = sampleRate
+            self.frameCount = frameCount
+            self.peakAmplitude = peakAmplitude
+            self.droppedSampleCount = droppedSampleCount
+            self.failure = failure
+            self.spans = spans
+            self.startOffset = startOffset
+            self.content = content
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            file = try container.decode(String.self, forKey: .file)
+            sampleRate = try container.decode(Double.self, forKey: .sampleRate)
+            frameCount = try container.decode(Int.self, forKey: .frameCount)
+            peakAmplitude = try container.decodeIfPresent(Float.self, forKey: .peakAmplitude)
+            droppedSampleCount = try container.decodeIfPresent(
+                Int.self, forKey: .droppedSampleCount)
+            failure = try container.decodeIfPresent(String.self, forKey: .failure)
+            content = try container.decodeIfPresent(TrackContent.self, forKey: .content)
+            startOffset = try container.decodeIfPresent(TimeInterval.self, forKey: .startOffset)
+
+            if container.contains(.spans) {
+                spans = try container.decodeIfPresent([Span].self, forKey: .spans)
+            } else if let startOffset {
+                spans = [
+                    Span(
+                        startOffset: startOffset,
+                        fileFrameOffset: 0,
+                        frameCount: frameCount)
+                ]
+            } else {
+                spans = nil
+            }
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(file, forKey: .file)
+            try container.encode(sampleRate, forKey: .sampleRate)
+            try container.encode(frameCount, forKey: .frameCount)
+            try container.encodeIfPresent(peakAmplitude, forKey: .peakAmplitude)
+            try container.encodeIfPresent(droppedSampleCount, forKey: .droppedSampleCount)
+            try container.encodeIfPresent(failure, forKey: .failure)
+            try container.encode(spans, forKey: .spans)
+            try container.encodeIfPresent(startOffset, forKey: .startOffset)
+            try container.encodeIfPresent(content, forKey: .content)
+        }
 
         /// A track found on disk after an interrupted session. Its length comes from the
         /// file; everything else was never written down, so it stays unknown rather than
@@ -63,6 +209,7 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
                 peakAmplitude: nil,
                 droppedSampleCount: nil,
                 failure: nil,
+                spans: nil,
                 startOffset: startOffset,
                 content: nil
             )
@@ -72,8 +219,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     /// A first-sample timestamp checkpointed while capture is still running.
     ///
     /// A mach host time is meaningful here only relative to another track from the same
-    /// recording. The finished manifest stores those differences as `startOffset`; the raw
-    /// values exist only long enough to survive an interrupted recording.
+    /// recording. The finished manifest stores those differences as the master and span
+    /// offsets; the raw values exist only long enough to survive an interrupted recording.
     public struct TrackStart: Codable, Equatable, Sendable {
         public let file: String
         public let hostTime: UInt64
@@ -179,8 +326,19 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         status = failure == nil ? .completed : .failed
         let origin = reports.compactMap(\.firstSampleHostTime).min()
         tracks = reports.map { report in
-            let offset = report.firstSampleHostTime.flatMap { first in
+            let startOffset = report.firstSampleHostTime.flatMap { first in
                 origin.map { HostTime.seconds(from: $0, to: first) }
+            }
+            let spans = report.spans.map { reportSpans in
+                reportSpans.compactMap { span in
+                    origin.map {
+                        Track.Span(
+                            startOffset: HostTime.seconds(from: $0, to: span.startHostTime),
+                            fileFrameOffset: span.fileFrameOffset,
+                            frameCount: span.frameCount
+                        )
+                    }
+                }
             }
             return Track(
                 file: report.file,
@@ -189,7 +347,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
                 peakAmplitude: report.peakAmplitude,
                 droppedSampleCount: report.droppedSampleCount,
                 failure: report.failure,
-                startOffset: offset,
+                spans: spans,
+                startOffset: startOffset,
                 content: report.content
             )
         }

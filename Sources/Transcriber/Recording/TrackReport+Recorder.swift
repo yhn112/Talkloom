@@ -16,6 +16,7 @@ extension TrackRecorder.Completion {
             frameCount: summary.frameCount,
             peakAmplitude: summary.peakAmplitude,
             droppedSampleCount: summary.droppedSampleCount,
+            spans: summary.spans,
             firstSampleHostTime: summary.firstSampleHostTime,
             failure: failure?.localizedDescription
         )

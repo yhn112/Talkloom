@@ -163,11 +163,8 @@ struct MenuBarView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             if track.droppedSampleCount > 0 {
-                // The track ends at the drop rather than carrying a hidden gap: everything
-                // after it would be written directly behind what came before, and the two
-                // tracks would no longer line up.
                 Text(
-                    "\(track.droppedSampleCount) samples were lost, so recording stopped at that point."
+                    "\(track.droppedSampleCount) samples were lost and replaced with silence to preserve timing."
                 )
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
