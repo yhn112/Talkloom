@@ -68,6 +68,36 @@ language mid-way — which the cloud engine did at 14.29% WER.
 Asset installation is required once per locale before any of this runs; `ru_RU` and `en_US`
 were installed on this machine during the measurement.
 
+## Per-word confidence, and what it separates
+
+`DictationTranscriber` carries `transcriptionConfidence` and `audioTimeRange` on the runs of
+its result text when both are requested as attribute options. Measured by running each fixture
+under both locales and reading the per-word runs.
+
+Mean confidence over the words of a fixture, by locale:
+
+| Fixture | `ru_RU` | `en_US` | Higher mean | Correct language |
+|---|---:|---:|---|---|
+| `ru_short` | 0.812 | 0.299 | `ru_RU` | `ru_RU` |
+| `en_short` | 0.133 | 0.843 | `en_US` | `en_US` |
+| `long_pause` | 0.108 | 0.973 | `en_US` | `en_US` |
+| `mixed_short` | 0.308 | 0.507 | `en_US` | neither alone |
+
+On monolingual audio the gap is between 2.7× and 9×, and the wrong locale produces confident
+nonsense only in the sense that it produces nonsense — `ru_short` under `en_US` came back as
+*"The device is a fixed machine but a hookah"* at a mean of 0.299. Mean confidence over a span
+therefore identifies the language of that span without any transcript comparison.
+
+Inside the mixed sentence the same separation appears at the right places. The English clause
+scores 0.379–0.700 under `en_US` against 0.173–0.254 under `ru_RU`; the Russian word `завтра`
+scores 0.753 under `ru_RU` against 0.411 for the `en_US` run's wrong guess at the same instant.
+
+Two things this does **not** establish. Confidence is not correctness at the word level: in the
+`en_US` run of `mixed_short` the incorrect `after` scored 0.411, above the correct `retry` at
+0.379. And combining two locale runs into one transcript is a real algorithm, not a lookup —
+two greedy per-word arbitration rules were tried on this fixture, one substituting a word and
+one dropping four, before the attempt was abandoned as out of scope for a measurement.
+
 ## Cloud re-run on the regenerated fixtures
 
 Run the same day, through the same client, to compare both engines on identical audio rather

@@ -47,6 +47,25 @@ The current measured no-VAD comparator is recorded in
 [`Tests/reports/baseline.md`](../Tests/reports/baseline.md). It is the baseline for the VAD
 experiment, not a claim about real-meeting quality.
 
+## A tiered engine is a candidate, not a decision
+
+The measured engines fail in different places: the cloud one invents speech on silence and
+guesses its own timestamps, the on-device one is exact and silent on silence but takes a single
+locale per run and damages whatever language it was not given. That asymmetry makes a tiered
+arrangement worth evaluating — transcribe locally, then spend a cloud request only where the
+local result is weak.
+
+Two things measured in [`Tests/reports/baseline.md`](../Tests/reports/baseline.md) are what
+would make it buildable. The on-device engine reports **per-word** time ranges and confidences,
+so a weak stretch can be named in seconds and cut out of the derived track exactly. And because
+the escalated chunk's position on the timeline is then known from our own boundaries, the cloud
+engine would be asked only for text — the one thing it does reliably.
+
+What is not established, and has to be before this becomes a plan: whether confidence predicts
+error well enough to route on, which it demonstrably does not do at the level of a single word;
+what rule combines two runs without losing words; and what any of this looks like on real
+speech rather than on one synthetic sentence.
+
 ## Product-pipeline boundary
 
 The fixture runner is intentionally below the product orchestration layer. It accepts an
