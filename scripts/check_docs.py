@@ -109,10 +109,33 @@ else:
                 if hit.group(0) != expected:
                     fail(path, line, f"bundle id {hit.group(0)!r} != project.yml {expected!r}")
 
-# 4. Every repository path named in backticks exists. This is what catches a renamed
-# script, a moved document, and a role that was consolidated away.
+# 4. Every repository path a document names exists, in both of the ways a document names
+# one. This is what catches a renamed script, a moved document, and a role that was
+# consolidated away. Backticks were checked from the start; markdown links were not, and
+# `78b1b7a` moved twenty-five files while the links pointing at them went unexamined.
 ROOTS = ("scripts/", "docs/", ".agents/", ".claude/", ".codex/", ".github/", "Packages/", "Sources/", "Tests/", "tests/", "Recordings/")
 PATHLIKE = re.compile(r"`([^`\s]+)`")
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def exists_exactly(target: Path) -> bool:
+    """Whether `target` exists with exactly this spelling.
+
+    `Path.exists()` answers case-insensitively on this machine's filesystem and
+    case-sensitively on github.com, so a link whose case is wrong passes here and 404s
+    where it is read. Walking the components against each directory's real listing is the
+    only way to ask the question the reader's browser will ask.
+    """
+    current = ROOT
+    try:
+        for part in target.relative_to(ROOT).parts:
+            if part not in {entry.name for entry in current.iterdir()}:
+                return False
+            current = current / part
+    except (OSError, ValueError):
+        return False
+    return True
+
 
 for path in docs():
     for line, text in numbered(path):
@@ -124,6 +147,19 @@ for path in docs():
                 continue
             if not (ROOT / ref).exists():
                 fail(path, line, f"names {ref!r}, which does not exist")
+
+        for hit in LINK.finditer(text):
+            ref = hit.group(1).split("#")[0]
+            # A bare anchor points inside this file; a URL is not ours to resolve.
+            if not ref or ref.startswith(("http://", "https://", "mailto:")) or ref in PLANNED:
+                continue
+            target = (path.parent / ref).resolve()
+            # `../../releases` and its kin are GitHub's own relative web links, which
+            # deliberately leave the working tree. Only paths that stay inside it are files.
+            if not target.is_relative_to(ROOT):
+                continue
+            if not exists_exactly(target):
+                fail(path, line, f"links to {ref!r}, which does not exist")
 
 # 5. The two clients must offer the same roles, and every adapter must point at a role
 # that is really there. A half-renamed role is invisible until a session cannot find it.
