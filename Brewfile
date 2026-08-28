@@ -10,6 +10,9 @@ brew "xcodegen"
 # Collapses xcodebuild output to the errors. Measured at 98 kB against 127 bytes for a
 # green run, which is the difference between an agent reading the failure and not.
 brew "xcsift"
+# Audits the workflows for the failures that never turn CI red: an action pinned to a
+# movable tag, a token left in .git/config, an expression that interpolates untrusted input.
+brew "zizmor"
 # The Python tooling for ASR evaluation and recording analysis lives in a uv-managed .venv.
 brew "uv"
 # Evaluation tooling only. The app itself uses afconvert, which ships with macOS, so that

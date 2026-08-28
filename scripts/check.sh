@@ -10,10 +10,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! command -v xcsift >/dev/null; then
-    echo "xcsift is missing — install it with: brew install xcsift" >&2
-    exit 127
-fi
+for tool in xcsift zizmor; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "$tool is missing — install it with: brew bundle" >&2
+        exit 127
+    fi
+done
 
 step() { printf '%-12s' "$1"; }
 ok() { echo "ok${1:+   $1}"; }
@@ -38,7 +40,20 @@ else
     exit 1
 fi
 
-# 3. The evaluation tooling. Python front ends must still import and parse their arguments;
+# 3. The workflows. A broken one turns CI red and announces itself; the failures worth a
+# gate are the quiet ones — an action pinned to a tag its owner can move, a token left in
+# .git/config for any later step to package up, an expression that splices untrusted input
+# into a shell. None of those ever fail a run. --offline because a gate that needs the
+# network is a gate that fails on a train.
+step workflows
+if ! workflow_problems=$(zizmor --offline --quiet .github/workflows/ 2>&1); then
+    fail
+    echo "$workflow_problems" | sed 's/^/  /'
+    exit 1
+fi
+ok
+
+# 4. The evaluation tooling. Python front ends must still import and parse their arguments;
 # shell entry points must still parse. An edit then fails here rather than when someone
 # reaches for the tool mid-diagnosis. .venv is a derived local artifact, so a missing one is
 # skipped rather than failed — `uv sync` creates it.
@@ -95,7 +110,7 @@ else
     ok "skipped, no .venv"
 fi
 
-# 4. Formatting. swift-format has no --check mode, so the tree is formatted into a copy and
+# 5. Formatting. swift-format has no --check mode, so the tree is formatted into a copy and
 # compared: a file that the formatter would change is a file that is not formatted.
 # Comparing output rather than running `lint --strict` is deliberate — a Logger message is
 # one string literal, the formatter cannot break it, and the resulting over-long line would
@@ -117,7 +132,7 @@ else
     exit 1
 fi
 
-# 5. The package's own tests. They need no signing, no test host and no hardware, so they
+# 6. The package's own tests. They need no signing, no test host and no hardware, so they
 # run first and in about a second: a broken WAV header should not cost a full app build to
 # discover.
 step package
@@ -132,7 +147,7 @@ else
     exit 1
 fi
 
-# 6. Build and tests. Device tests live in their own scheme and are skipped here: they need
+# 7. Build and tests. Device tests live in their own scheme and are skipped here: they need
 # a microphone and make audible noise. xcsift collapses xcodebuild's output — measured at
 # 98 kB for a green run against 127 bytes — while -E preserves the failure exit code, which
 # the pipeline would otherwise swallow.

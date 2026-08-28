@@ -37,7 +37,13 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: 1
 
     steps:
-      - uses: actions/checkout@v7
+      # persist-credentials: false because nothing after this step speaks to git over the
+      # network. The release is created through the API with GH_TOKEN, and the only git call
+      # left reads the local HEAD. Leaving the token in .git/config would put it one careless
+      # `ditto` away from an artifact.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Through the Brewfile rather than naming tools here, so adding one is a single edit
       # and the documented setup is what gets exercised.
@@ -81,7 +87,7 @@ jobs:
           hdiutil create -volname Transcriber -ov -format UDZO -quiet \
             -srcfolder "$stage" Transcriber.dmg
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Transcriber-${{ github.sha }}
           path: Transcriber.dmg
