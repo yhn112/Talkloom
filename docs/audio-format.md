@@ -19,7 +19,7 @@ recording. The same conversion over a finished file is frame-exact — one-secon
 which is the property the offline step exists to have and the live loop measurably did not.
 
 Nothing in this project needs live audio: transcription happens after the meeting, so the
-constraint costs nothing. `Packages/TranscriberCore/Sources/TranscriberCore/SessionAudio.swift`
+constraint costs nothing. `Packages/TranscriberCore/Sources/TranscriberCore/Audio/SessionAudio.swift`
 is the one place the conversion is allowed to run, over a completed session.
 
 Keeping the master also means a better model can be re-run later against the original audio
@@ -35,7 +35,8 @@ available to the Python evaluation tooling in `.venv`, which only ever runs on t
 
 The process tap delivers its first sample almost immediately. The microphone does not: the
 echo canceller takes about 0.75 s to come up, and about 2.7 s the first time in a process —
-measured at 2.709 s on a real recording (`Tests/TranscriberTests/StartupLatencyTests.swift`).
+measured at 2.709 s on a real recording
+(`Tests/TranscriberTests/Device/StartupLatencyTests.swift`).
 The engine's `start()` call returns long before the unit delivers anything, so the number that
 matters is time to the first sample, not time to return.
 
