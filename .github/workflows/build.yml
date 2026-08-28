@@ -23,6 +23,10 @@ concurrency:
 
 jobs:
   check:
+    permissions:
+      # Publishing the rolling build writes a release and a tag. Nothing else here needs it,
+      # and the workflow default above stays read.
+      contents: write
     # Pinned rather than macos-latest. This image carries Xcode 26.6 (17F113), the toolchain
     # the project is developed against and the one Package.swift's tools version requires; a
     # moving label would change the compiler without a commit saying so.
@@ -61,19 +65,42 @@ jobs:
       # A disk image rather than the bundle: upload-artifact zips what it is handed, and a
       # zipped .app loses the symlinks and permission bits that make it launchable.
       #
-      # It is ad-hoc signed and not notarized, which is a decision and not an omission — this
-      # project is not distributed. Downloading the image marks it with com.apple.quarantine
-      # and Gatekeeper will refuse it; `xattr -dr com.apple.quarantine` on the extracted app
-      # is what opens it. TCC grants will not carry over from a locally built copy either,
-      # because the signature differs.
+      # Staged with a link to /Applications beside the app, so installing is the drag everyone
+      # already knows rather than a bundle sitting alone in a window. ditto rather than cp: it
+      # is the tool that carries a bundle's metadata across intact, and a mangled bundle is a
+      # broken signature.
+      #
+      # The image is ad-hoc signed and not notarized, which is a decision and not an omission —
+      # this project is not distributed. .github/release-notes.md tells whoever downloads one
+      # what that costs them.
       - name: Package the app
         run: |
+          stage="$(mktemp -d)"
+          ditto build-release/Build/Products/Release/Transcriber.app "$stage/Transcriber.app"
+          ln -s /Applications "$stage/Applications"
           hdiutil create -volname Transcriber -ov -format UDZO -quiet \
-            -srcfolder build-release/Build/Products/Release/Transcriber.app \
-            Transcriber.dmg
+            -srcfolder "$stage" Transcriber.dmg
 
       - uses: actions/upload-artifact@v7
         with:
           name: Transcriber-${{ github.sha }}
           path: Transcriber.dmg
           retention-days: 14
+
+      # A rolling prerelease rather than one release per tag. There is nothing to version yet
+      # — project.yml pins 0.1.0 and nothing moves it — and the useful property is that the
+      # newest build is one click from the front page instead of three from a run's page.
+      # Prerelease because it is honestly not a release; the badge says so on the page.
+      #
+      # Delete and recreate rather than upload over: that is what moves the tag onto this
+      # commit, and a `latest` tag pointing at an older one is worse than no tag.
+      - name: Publish the latest build
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Transcriber.dmg \
+            --prerelease \
+            --title "Latest build ($(git rev-parse --short HEAD))" \
+            --notes-file .github/release-notes.md

@@ -27,9 +27,10 @@ generated from `project.yml` by XcodeGen and is deliberately not in the reposito
 
 ## Running a build
 
-Every CI run attaches a disk image, under Artifacts on the run's page. It is ad-hoc signed
-and deliberately not notarized — this project is not distributed — so macOS quarantines it on
-download and refuses to open it. After dragging the app across:
+The newest build of `main` is a disk image on the [Releases](../../releases) page, replaced
+by every push; a build of any other branch is attached to its own CI run under Artifacts. Both
+are ad-hoc signed and deliberately not notarized — this project is not distributed — so macOS
+quarantines the image on download and refuses to open it. Drag the app to Applications, then:
 
 ```bash
 sudo xattr -dr com.apple.quarantine /Applications/Transcriber.app
