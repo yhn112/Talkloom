@@ -29,7 +29,5 @@
 	<string>Transcriber records your voice to transcribe the meeting. Recordings stay on this Mac.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Transcriber records the call audio to transcribe what other participants say. Recordings stay on this Mac.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Transcriber converts speech to text on this Mac.</string>
 </dict>
 </plist>
