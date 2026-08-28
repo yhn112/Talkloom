@@ -62,6 +62,22 @@ if ! git check-ignore -q .openrouter.apikey; then
     echo "  .openrouter.apikey must stay ignored by git"
     exit 1
 fi
+# The guard above, and openrouter-credential.sh, both protect the credential by file name.
+# A key pasted into a source file, a document or a fixture is caught by neither, and the
+# repository is public. GitHub scans pushes for the provider formats it recognises, but the
+# non-provider patterns that would cover an unrecognised one need a licence this repository
+# does not have — checked, and the API accepts the request and ignores it — so the generic
+# half belongs here.
+#
+# Every pattern is written so that it cannot match this file: each requires a run of key
+# characters exactly where the literal has a bracket. Simplifying that away makes the gate
+# fail on itself, permanently.
+if leaked=$(git grep -nIE 'sk-or-v1-[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'); then
+    fail
+    echo "  a credential appears in a tracked file:"
+    echo "$leaked" | sed 's/^/    /'
+    exit 1
+fi
 if [ -x .venv/bin/python ]; then
     broken=""
     for script in wer audio_check track_compare; do
