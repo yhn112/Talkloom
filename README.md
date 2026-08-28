@@ -25,6 +25,37 @@ rules that govern changes are in [`AGENTS.md`](AGENTS.md); `scripts/doctor.sh` r
 this machine is missing and where each piece comes from. `Transcriber.xcodeproj` is
 generated from `project.yml` by XcodeGen and is deliberately not in the repository.
 
+## Running a build
+
+Every CI run attaches a disk image, under Artifacts on the run's page. It is ad-hoc signed
+and deliberately not notarized — this project is not distributed — so macOS quarantines it on
+download and refuses to open it. After dragging the app across:
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/Transcriber.app
+```
+
+## Permissions
+
+Recording needs two grants, and they are granted independently, so exactly one of them
+missing is what a single silent track looks like:
+
+- **Microphone** — System Settings › Privacy & Security › Microphone. The app asks the first
+  time you record.
+- **Audio Recording** — System Settings › Privacy & Security › Audio Recording. This is the
+  system side, captured through a CoreAudio process tap. macOS offers no way to ask for it up
+  front, so the prompt appears when a recording first taps the output.
+
+Screen Recording is not among them and never will be: requesting it for audio-only capture is
+a trade this project does not make.
+
+macOS binds both grants to the app's signature. A locally built app keeps them across
+rebuilds, which is the whole reason `scripts/make-signing-cert.sh` exists; a CI build is
+ad-hoc signed and is therefore a different app to the system every time, so a downloaded one
+inherits nothing from the one before it. A recording that comes out silent with no prompt at
+all is that, rather than a fault in capture —
+[`.agents/skills/audio-doctor/SKILL.md`](.agents/skills/audio-doctor/SKILL.md) has the reset.
+
 ## Where things are written down
 
 | | |

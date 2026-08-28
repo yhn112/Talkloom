@@ -54,6 +54,7 @@ def docs() -> list[Path]:
         ROOT / "AGENTS.md",
         ROOT / "CLAUDE.md",
         ROOT / "PLAN.md",
+        ROOT / "README.md",
         *sorted((ROOT / "docs").glob("*.md")),
         *sorted((ROOT / ".agents").rglob("*.md")),
         *sorted((ROOT / ".claude" / "agents").glob("*.md")),
