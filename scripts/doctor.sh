@@ -10,7 +10,10 @@
 # than the code.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+# Deliberately no `set -e` — this script reports every missing tool rather than stopping at
+# the first. That makes the one unchecked failure below matter: without `|| exit`, a cd that
+# fails would leave it describing whatever directory it happened to start in.
+cd "$(dirname "$0")/.." || exit 1
 
 missing=0
 

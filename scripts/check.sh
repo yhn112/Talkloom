@@ -42,12 +42,19 @@ fi
 # shell entry points must still parse. An edit then fails here rather than when someone
 # reaches for the tool mid-diagnosis. .venv is a derived local artifact, so a missing one is
 # skipped rather than failed — `uv sync` creates it.
+#
+# One file per call, and every file. `bash -n a.sh b.sh` parses only a.sh — b.sh becomes its
+# $1 — so the two-argument form this used to have exited zero without ever reading the second
+# script, and nine of the eleven were not named at all.
 step tools
-if ! shell_problems=$(
-    bash -n scripts/generate-asr-smoke-fixtures.sh scripts/openrouter-asr-eval.sh 2>&1
-); then
+shell_problems=""
+for script in scripts/*.sh; do
+    problem=$(bash -n "$script" 2>&1) || shell_problems="${shell_problems}${problem}
+"
+done
+if [ -n "$shell_problems" ]; then
     fail
-    echo "$shell_problems" | sed 's/^/  /'
+    printf '%s' "$shell_problems" | sed 's/^/  /'
     exit 1
 fi
 if ! git check-ignore -q .openrouter.apikey; then
