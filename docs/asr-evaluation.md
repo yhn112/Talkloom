@@ -101,6 +101,41 @@ Three limits come with it, and they are mechanical rather than matters of taste:
 - **A generated reference belongs to exactly the audio it came from.** `scripts/generate-asr-reference.sh`
   writes a sidecar naming the engine, the model and the audio's checksum, so a reference left
   beside regenerated audio is detectable rather than quietly wrong.
+- **A short response makes a short reference.** Generation is one ordinary request, so a
+  response that stopped early yields a reference covering only the part that came back, and a
+  hypothesis that stops in the same place then scores zero against it. Check the coverage of a
+  generation request before the reference it produced is used — see below.
+
+## Coverage, and why it is checked before the metric
+
+A remote engine can return a well-formed, entirely plausible transcript that covers less audio
+than it was given, and nothing in the response says so. Coverage is the check that catches it:
+the timestamp at which the returned segments stop, against the duration this project measured
+for the chunk it sent. The chunk's bounds are ours and are a measurement; where the words stop
+is the model's, and it is not obliged to be the end.
+
+This is a reproduced observation here, not an imported worry. In the real-recording probe
+([`Tests/reports/baseline.md`](../Tests/reports/baseline.md)) the system-audio response ended at
+57.00 s of a 68.757 s track. It was benign — a separate energy check found continuous silence
+from 56.15 s to the end, so nothing was lost. The point is what settled it: an independent
+measurement over the uncovered interval, run by hand, required by no procedure. A response that
+stops early because the audio ended and one that stops early because the engine did are the same
+response until something looks at the audio underneath the gap.
+
+So the order is fixed. Compute coverage first; if it is short, measure energy over the uncovered
+interval and say which of the two it was; only then quote a WER. Reading the metric first gets
+this backwards, because a truncated hypothesis scored against a truncated reference is
+indistinguishable from a good result, and one scored against a full reference presents as a mass
+of deletions that invites blaming the model's accuracy for a transport-shaped failure.
+
+What remains unverified is the case that motivates the check: silent truncation of genuinely long
+audio. The longest thing measured here is that 68.757 s track, and no run has yet been given a
+meeting-length one. That makes it a code risk rather than a reproduced failure, and the first
+long-audio run is where it stops being either.
+
+A baseline entry therefore names the engine and the exact model version alongside its numbers.
+Without that, a provider changing a model underneath the same name is indistinguishable from a
+regression in this project's code, and gets attributed to it.
 
 ## The tiered engine, and why it is closed
 

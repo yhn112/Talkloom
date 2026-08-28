@@ -25,14 +25,23 @@ both languages rather than inferred.
 
 **Diarization.** Splitting microphone and system audio into separate tracks already gives
 an exact "me" versus "them". Voice clustering is only needed *within* the system track.
-Never replace a reliable source-based split with a probabilistic model.
+Never replace a reliable source-based split with a probabilistic model — and when an engine
+is asked to attribute speakers itself, its labels are a hypothesis to be checked against the
+channel the audio came from, never a replacement for it.
+
+**A remote engine's failure modes are its own.** It shares the hallucination on silence that
+makes VAD mandatory — that was measured here, not assumed away — but it adds one the local
+engine cannot have: a well-formed response covering less audio than it was sent, saying
+nothing about it. So coverage is checked before any metric is read, and a baseline entry
+names the exact model version, because a provider changing a model under the same name
+otherwise reads as a regression in our code. `docs/asr-evaluation.md` owns both.
 
 ## How to work
 
-Confirm every change with the `asr-eval` skill: WER separately for Russian and English,
-hallucination rate on silence, speed relative to real time, and peak memory. Compare
-against the recorded baseline. "Sounds better" is not a result; if the fixtures don't
-cover your hypothesis, add a fixture first.
+Confirm every change with the `asr-eval` skill: coverage of the audio sent, WER separately
+for Russian and English, hallucination rate on silence, speed relative to real time, and
+peak memory. Compare against the recorded baseline. "Sounds better" is not a result; if the
+fixtures don't cover your hypothesis, add a fixture first.
 
 Keep model, VAD, and chunking changes to one independent variable per run.
 

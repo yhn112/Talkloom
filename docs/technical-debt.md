@@ -173,6 +173,19 @@ run is not evidence that the app can produce a transcript.
 a completed session and produces derived tracks plus a timestamp-aligned transcript; the
 fixture runner remains only a transport-level probe.
 
+### D26 — nothing measures how much audio a response covered
+`open · P1 · confirmed fact` — `docs/asr-evaluation.md` now requires coverage to be read
+before any metric, and nothing computes it. `scripts/asr-eval.sh` prints duration, elapsed, xRT
+and cost; the report already carries `audioDurationSeconds` and every segment's `endTime`, so
+the shortfall is one subtraction that is simply not made. In the real-recording probe the system
+response ended at 57.00 s of a 68.757 s track and was cleared only by an energy check run by
+hand ([`Tests/reports/baseline.md`](../Tests/reports/baseline.md)). Separately, no run has ever
+sent meeting-length audio — the longest measured is that 68.757 s track — so silent truncation
+at real durations stays a code risk nobody has been able to reproduce or rule out.
+**Exit:** the shared runner prints coverage beside xRT and fails loudly when segments stop short
+of the audio without an accompanying silence check, and one meeting-length recording has been
+run through it.
+
 ## Intentionally retained complexity
 
 Justified by current requirements. Do not simplify these away without new evidence:
