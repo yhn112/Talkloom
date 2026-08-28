@@ -1,0 +1,135 @@
+# Keeps the Python evaluation tooling on current releases, and proves the move before
+# proposing it.
+#
+# The lock is committed so that the WER and CER tables in Tests/reports/baseline.md can be
+# recomputed by the same jiwer that produced them — nothing in that file records which one it
+# was. But a lock nobody updates delivers reproducibility by standing still, and eventually
+# the tooling is pinned to releases that no longer resolve against anything. This is the
+# other half of the bargain: once a week the dependencies are re-resolved to whatever is
+# newest, the project's gate runs against them, and only a green run opens a pull request.
+# A red one is the answer instead — arriving at a known time, with a known cause, rather than
+# on the afternoon somebody happened to rebuild their environment.
+#
+# macOS rather than Linux, and not out of preference: scripts/pyproject.toml restricts
+# resolution to darwin/arm64, so there is nothing for `uv sync` to install anywhere else.
+name: tooling-upgrade
+
+on:
+  schedule:
+    # Monday, off the top of the hour: GitHub queues cron jobs that all fire at :00, and
+    # nothing here cares about the exact minute.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tooling-upgrade
+  cancel-in-progress: true
+
+jobs:
+  upgrade:
+    permissions:
+      # Pushing the proposal branch and opening the pull request. Nothing else here writes,
+      # and the workflow default above stays read.
+      contents: write
+      pull-requests: write
+    # The same image as build.yml, for the same reason: a moving label would change the
+    # toolchain without a commit saying so, and this job runs the full gate.
+    runs-on: macos-26
+    env:
+      XCODE_XCCONFIG_FILE: ${{ github.workspace }}/.github/ci-signing.xcconfig
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+    steps:
+      # persist-credentials: false, as in build.yml. The one push this job makes carries its
+      # credential on the command line instead, so no token is left in .git/config for a
+      # later step to package up.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the command-line tools
+        run: brew bundle
+
+      # The version lines are the whole signal and a lock diff is unreadable, so the two
+      # locks are reduced to name/version pairs and compared. An empty result means the
+      # tooling was already current, and the rest of the job is skipped rather than opening
+      # an empty pull request every Monday.
+      - name: Re-resolve to the newest releases
+        id: upgrade
+        run: |
+          cp scripts/uv.lock "${RUNNER_TEMP}/before.lock"
+          uv lock --upgrade --project scripts
+          python3 - "${RUNNER_TEMP}/before.lock" scripts/uv.lock > "${RUNNER_TEMP}/moves.md" <<'PY'
+          import pathlib, re, sys
+
+
+          def versions(path):
+              found = {}
+              for block in pathlib.Path(path).read_text().split("[[package]]")[1:]:
+                  name = re.search(r'name = "([^"]+)"', block)
+                  version = re.search(r'version = "([^"]+)"', block)
+                  if name and version:
+                      found[name.group(1)] = version.group(1)
+              return found
+
+
+          before, after = versions(sys.argv[1]), versions(sys.argv[2])
+          for name in sorted(set(before) | set(after)):
+              was, now = before.get(name), after.get(name)
+              if was != now:
+                  print(f"- `{name}` {was or '(absent)'} → {now or '(dropped)'}")
+          PY
+          if [ -s "${RUNNER_TEMP}/moves.md" ]; then
+              echo "moved=true" >> "$GITHUB_OUTPUT"
+              cat "${RUNNER_TEMP}/moves.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+              echo "moved=false" >> "$GITHUB_OUTPUT"
+              echo 'Already on the newest releases; nothing to propose.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Create the evaluation environment
+        if: steps.upgrade.outputs.moved == 'true'
+        run: uv sync --project scripts
+
+      # The gate, unabridged, because it is the project's definition of verified without
+      # hardware and a second weaker definition here would be the thing that rots. If this
+      # fails while the same gate is green on main, the upgrade is the difference.
+      - name: scripts/check.sh
+        if: steps.upgrade.outputs.moved == 'true'
+        run: scripts/check.sh
+
+      # One long-lived branch, force-pushed, so a month of Mondays leaves one pull request to
+      # read rather than four to close. A push authenticated with GITHUB_TOKEN does not start
+      # another workflow — GitHub's loop protection — so build.yml will not run on this
+      # branch. That is not a gap: the gate has already run above, on this exact lock.
+      - name: Propose the upgrade
+        if: steps.upgrade.outputs.moved == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c tooling/uv-upgrade
+          git add scripts/uv.lock
+          git commit -F - <<COMMIT
+          build: move the evaluation tooling to current releases
+
+          Re-resolved by .github/workflows/tooling-upgrade.yml:
+
+          $(cat "${RUNNER_TEMP}/moves.md")
+
+          scripts/check.sh ran green against this lock in run ${GITHUB_RUN_ID}.
+          COMMIT
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:refs/heads/tooling/uv-upgrade
+          gh pr view tooling/uv-upgrade >/dev/null 2>&1 || gh pr create \
+            --base main --head tooling/uv-upgrade \
+            --title 'build: move the evaluation tooling to current releases' \
+            --body "$(printf '%s\n\n%s\n' \
+              "$(cat "${RUNNER_TEMP}/moves.md")" \
+              "\`scripts/check.sh\` ran green against this lock. Merging keeps the recorded measurements recomputable by tools that still resolve.")"
