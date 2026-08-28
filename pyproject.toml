@@ -6,6 +6,14 @@
 #   uv sync        # create or update .venv from uv.lock
 #
 # The app ships nothing from here. Whisper runs in Swift; see PLAN.md.
+#
+# Why the lock is committed and this list is not enough on its own: the dependencies below
+# are deliberately unversioned, so this file says which tools the scripts need and nothing
+# about which release produced any given number. uv.lock says that. Every measurement this
+# repository keeps — the WER tables, the peak and RMS levels — was computed by a specific
+# jiwer and a specific numpy, and a measurement that cannot be recomputed is an anecdote.
+# So `uv sync` is the only supported way to build .venv, and a dependency moves when the
+# lock is updated on purpose rather than on whatever day someone rebuilt the environment.
 
 [project]
 name = "transcriber-tooling"
@@ -24,3 +32,10 @@ dependencies = [
 [tool.uv]
 # Tooling, not a distributable package: there is nothing to build or install from here.
 package = false
+# uv resolves for every platform at once and the lock stores a wheel hash list for each, so
+# most of an unrestricted uv.lock describes manylinux, musllinux, Windows and iOS — none of
+# which this project has. It is macOS on Apple silicon (AGENTS.md, "Environment") and CI runs
+# the same architecture, so the resolution is narrowed to that. The versions resolved are
+# unchanged; what changes is that `uv sync` somewhere else now fails and says so, instead of
+# quietly installing a different set from the same file.
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
