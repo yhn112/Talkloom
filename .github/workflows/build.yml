@@ -58,6 +58,28 @@ jobs:
       - name: scripts/check.sh
         run: scripts/check.sh
 
+      # After the gate, not inside it: instrumentation slows the build, and coverage is a
+      # measurement rather than a pass/fail. Two reports, because the two halves of this
+      # project mean different things when measured — codecov.yml explains which and why.
+      - name: Measure coverage
+        run: scripts/coverage.sh
+
+      - name: Upload core coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/core.lcov
+          flags: core
+          fail_ci_if_error: true
+
+      - name: Upload app coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/app.lcov
+          flags: app
+          fail_ci_if_error: true
+
       # check.sh builds Debug, so ENABLE_HARDENED_RUNTIME=YES is exercised nowhere else. It
       # changes what dyld agrees to load, which is the kind of break that would otherwise
       # surface the first time someone tried to cut a release.

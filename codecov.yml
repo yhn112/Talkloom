@@ -1,0 +1,41 @@
+# Two flags, because this project has two halves that mean different things when measured.
+#
+# `core` is Packages/TranscriberCore — the code that exists specifically to be verifiable
+# without hardware, and the only place where a coverage figure is a statement about the tests.
+# `app` is everything that touches CoreAudio, AVFoundation and the UI; the tests that reach it
+# need a microphone, live in the DeviceTests suite, and are excluded from every automated run
+# on purpose. Its number is therefore a description of what a machine without a microphone can
+# execute, not a goal, and pushing it up by writing tests that avoid the hardware would make
+# the suite worse.
+#
+# scripts/coverage.sh produces both, and keeps the package's files out of the app's report so
+# that nothing is counted twice.
+
+coverage:
+  status:
+    project:
+      default:
+        # Informational everywhere: a coverage delta is worth reading and is not a reason to
+        # block work on a project whose hardware half cannot be measured here at all.
+        informational: true
+      core:
+        flags: [core]
+        informational: true
+      app:
+        flags: [app]
+        informational: true
+    patch:
+      default:
+        informational: true
+
+flags:
+  core:
+    paths:
+      - Packages/TranscriberCore/Sources/
+  app:
+    paths:
+      - Sources/Transcriber/
+
+comment:
+  layout: "flags, files"
+  require_changes: true

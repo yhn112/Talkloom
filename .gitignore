@@ -15,7 +15,9 @@ Packages/*/.swiftpm/
 # Build products
 /build/
 /build-codeql/
+/build-coverage/
 /build-release/
+/coverage/
 /DerivedData/
 *.dmg
 
