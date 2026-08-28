@@ -1,5 +1,9 @@
 # Transcriber
 
+<p align="center">
+  <img src="Resources/Brand/TranscriberIcon.png" alt="Transcriber icon" width="144">
+</p>
+
 [![build](https://github.com/yhn112/Transcriber/actions/workflows/build.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/build.yml)
 [![codeql](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml)
 [![codecov](https://codecov.io/gh/yhn112/Transcriber/branch/main/graph/badge.svg)](https://codecov.io/gh/yhn112/Transcriber)
