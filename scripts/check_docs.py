@@ -110,7 +110,7 @@ else:
 
 # 4. Every repository path named in backticks exists. This is what catches a renamed
 # script, a moved document, and a role that was consolidated away.
-ROOTS = ("scripts/", "docs/", ".agents/", ".claude/", ".codex/", "Packages/", "Sources/", "Tests/", "tests/", "Recordings/")
+ROOTS = ("scripts/", "docs/", ".agents/", ".claude/", ".codex/", ".github/", "Packages/", "Sources/", "Tests/", "tests/", "Recordings/")
 PATHLIKE = re.compile(r"`([^`\s]+)`")
 
 for path in docs():

@@ -1,0 +1,14 @@
+// Signing for CI, applied through XCODE_XCCONFIG_FILE in .github/workflows/build.yml.
+//
+// project.yml pins CODE_SIGN_IDENTITY to "Transcriber Dev", and that certificate exists for
+// exactly one reason: macOS binds microphone and audio-capture grants to a signature, so a
+// stable certificate keeps TCC grants alive across rebuilds (scripts/make-signing-cert.sh).
+// A runner holds no grants and records nothing, so the reason does not reach it. Importing a
+// private key into CI would be a real secret stored for no benefit at all.
+//
+// Overriding here rather than in project.yml or scripts/check.sh is what keeps the gate one
+// thing: CI runs the script a developer runs, and only the signature differs. Verified on
+// Xcode 26.6 — an ad-hoc host still accepts the injected test bundle, because the two agree
+// on having no team identity rather than on sharing one.
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Automatic

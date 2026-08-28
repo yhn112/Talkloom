@@ -14,7 +14,9 @@ Packages/*/.swiftpm/
 
 # Build products
 /build/
+/build-release/
 /DerivedData/
+*.dmg
 
 # Local environment for the Python tooling
 /.venv/

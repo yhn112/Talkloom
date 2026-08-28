@@ -1,0 +1,79 @@
+# The project's gate, run on a machine that has never seen this repository before.
+#
+# `scripts/check.sh` is the whole definition of verified-without-hardware, so this calls it
+# instead of restating its steps: a step added there is covered here the same day. What CI
+# adds is the clean checkout — XcodeGen builds the source list from the filesystem, so a file
+# that exists locally and was never committed compiles at home and is missing for everyone
+# else — and a Release build, which the local gate never makes.
+#
+# Device tests are absent by construction. They live in their own schemes behind
+# TRANSCRIBER_DEVICE_TESTS, need a microphone, and make audible noise.
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Pinned rather than macos-latest. This image carries Xcode 26.6 (17F113), the toolchain
+    # the project is developed against and the one Package.swift's tools version requires; a
+    # moving label would change the compiler without a commit saying so.
+    runs-on: macos-26
+    env:
+      XCODE_XCCONFIG_FILE: ${{ github.workspace }}/.github/ci-signing.xcconfig
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Through the Brewfile rather than naming tools here, so adding one is a single edit
+      # and the documented setup is what gets exercised.
+      - name: Install the command-line tools
+        run: brew bundle
+
+      # Without a .venv, check.sh skips its tooling step rather than failing it. Building one
+      # from uv.lock is what gives that step something to check, and proves the lock resolves.
+      - name: Create the evaluation environment
+        run: uv sync
+
+      - name: scripts/check.sh
+        run: scripts/check.sh
+
+      # check.sh builds Debug, so ENABLE_HARDENED_RUNTIME=YES is exercised nowhere else. It
+      # changes what dyld agrees to load, which is the kind of break that would otherwise
+      # surface the first time someone tried to cut a release.
+      - name: Release build
+        shell: bash
+        run: |
+          xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+            -configuration Release -derivedDataPath build-release build \
+            | xcsift -f toon -w -E
+
+      # A disk image rather than the bundle: upload-artifact zips what it is handed, and a
+      # zipped .app loses the symlinks and permission bits that make it launchable.
+      #
+      # It is ad-hoc signed and not notarized, which is a decision and not an omission — this
+      # project is not distributed. Downloading the image marks it with com.apple.quarantine
+      # and Gatekeeper will refuse it; `xattr -dr com.apple.quarantine` on the extracted app
+      # is what opens it. TCC grants will not carry over from a locally built copy either,
+      # because the signature differs.
+      - name: Package the app
+        run: |
+          hdiutil create -volname Transcriber -ov -format UDZO -quiet \
+            -srcfolder build-release/Build/Products/Release/Transcriber.app \
+            Transcriber.dmg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Transcriber-${{ github.sha }}
+          path: Transcriber.dmg
+          retention-days: 14

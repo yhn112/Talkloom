@@ -353,6 +353,10 @@ non-zero on the first failure. Run it before saying a change is done; it is fast
 skipping it is never justified. What it covers, and what to do when a step fails, are in the
 skill `build`.
 
+CI is not a substitute for running it. `.github/workflows/build.yml` runs the same script on
+every push, over a clean checkout and a Release build the local gate never makes, but it
+reports after the fact and signs ad-hoc, having no TCC grants to keep alive.
+
 A green run there is not working capture. It is compatible with this project's signature
 failure: a valid `.wav` of exactly the right duration containing pure silence. Capture code
 is therefore not verified until it has been checked against a real recording — record a few
