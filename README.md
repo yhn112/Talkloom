@@ -1,5 +1,9 @@
 # Transcriber
 
+[![build](https://github.com/yhn112/Transcriber/actions/workflows/build.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/build.yml)
+[![codeql](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A local meeting transcriber for macOS. A menu-bar app records the microphone and system
 audio during a call, transcribes the recording, and produces a summary. Meetings are held
 in Russian and English, often mixed.
