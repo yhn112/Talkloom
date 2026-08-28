@@ -58,6 +58,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before init, and that is the whole point. CodeQL traces everything after it by
+      # injecting libtrace.dylib through DYLD_INSERT_LIBRARIES, which lands the process tree
+      # on x86_64; Homebrew then refuses every formula with "Cannot install under Rosetta 2
+      # in ARM default prefix". Installing tools is not compilation and has no business being
+      # observed, so it happens first and the tracer never sees it.
+      - name: Install the command-line tools
+        if: matrix.language == 'swift'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: |
+          brew bundle
+          xcodegen generate --quiet
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4 (codeql-bundle-v2.26.4)
         with:
@@ -77,11 +91,7 @@ jobs:
         if: matrix.language == 'swift'
         env:
           XCODE_XCCONFIG_FILE: ${{ github.workspace }}/.github/ci-signing.xcconfig
-          HOMEBREW_NO_AUTO_UPDATE: 1
-          HOMEBREW_NO_INSTALL_CLEANUP: 1
         run: |
-          brew bundle
-          xcodegen generate --quiet
           swift build --package-path Packages/TranscriberCore
           xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
             -configuration Debug -derivedDataPath build-codeql build-for-testing
