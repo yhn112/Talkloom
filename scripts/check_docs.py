@@ -229,6 +229,29 @@ if agents_size > AGENTS_BUDGET:
         "into docs/ or delete a rule; raising the number is a decision to argue in the commit"
     )
 
+# 11. A badge states a version, which makes it a copy of one that project.yml owns, and
+# "one fact, one place" would forbid it outright if the copy could not be checked. It can be,
+# so the rule is the same one applied to the bundle id above: the duplicate is allowed to
+# exist exactly as long as something fails when it stops agreeing with its source.
+readme = ROOT / "README.md"
+badges = {
+    "macOS": (re.compile(r"img\.shields\.io/badge/macOS-([\d.]+)%2B"), r'macOS:\s*"([^"]+)"'),
+    "Swift": (re.compile(r"img\.shields\.io/badge/Swift-([\d.]+)-"), r'SWIFT_VERSION:\s*"([^"]+)"'),
+}
+for label, (badge_pattern, setting_pattern) in badges.items():
+    setting = re.search(setting_pattern, project)
+    shown = badge_pattern.search(readme.read_text())
+    if not setting:
+        problems.append(f"project.yml  no setting matching {setting_pattern!r}")
+    elif not shown:
+        fail(readme, 1, f"the {label} badge is gone; project.yml still sets {setting.group(1)}")
+    elif shown.group(1) != setting.group(1):
+        fail(
+            readme,
+            line_containing(readme, "img.shields.io/badge/" + label),
+            f"{label} badge says {shown.group(1)}, project.yml says {setting.group(1)}",
+        )
+
 if problems:
     print("\n".join(problems), file=sys.stderr)
     sys.exit(1)

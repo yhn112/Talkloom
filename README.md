@@ -2,6 +2,9 @@
 
 [![build](https://github.com/yhn112/Transcriber/actions/workflows/build.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/build.yml)
 [![codeql](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/yhn112/Transcriber/branch/main/graph/badge.svg)](https://codecov.io/gh/yhn112/Transcriber)
+[![macOS 15.0+](https://img.shields.io/badge/macOS-15.0%2B-lightgrey.svg)](project.yml)
+[![Swift 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg)](project.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A local meeting transcriber for macOS. A menu-bar app records the microphone and system
