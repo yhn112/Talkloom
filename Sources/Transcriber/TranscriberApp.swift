@@ -17,7 +17,13 @@ struct TranscriberApp: App {
         } label: {
             // The icon is the only recording indicator: LSUIElement hides the Dock icon,
             // so a running capture must be visible from the menu bar alone.
-            Image(systemName: controller.isRecording ? "record.circle.fill" : "waveform")
+            Image(controller.isRecording ? "MenuBarRecordingIcon" : "MenuBarIcon")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 16, height: 16)
+                .accessibilityLabel(
+                    controller.isRecording ? "Transcriber is recording" : "Transcriber")
         }
         .menuBarExtraStyle(.window)
     }
