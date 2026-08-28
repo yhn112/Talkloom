@@ -23,8 +23,8 @@ if [ $# -eq 0 ]; then
     exit 2
 fi
 
-if [ ! -x .venv/bin/python ]; then
-    echo ".venv is missing — run uv sync" >&2
+if [ ! -x scripts/.venv/bin/python ]; then
+    echo "scripts/.venv is missing — run uv sync --project scripts" >&2
     exit 127
 fi
 
@@ -57,7 +57,7 @@ for audio in "$@"; do
     TRANSCRIBER_SIDECAR="$sidecar" \
     TRANSCRIBER_CHECKSUM="$checksum" \
     TRANSCRIBER_GENERATED_AT="$generated_at" \
-        .venv/bin/python - "$report" <<'PY'
+        scripts/.venv/bin/python - "$report" <<'PY'
 import json
 import os
 import sys

@@ -50,17 +50,17 @@ jobs:
       - name: Install the command-line tools
         run: brew bundle
 
-      # Without a .venv, check.sh skips its tooling step rather than failing it. Building one
-      # from uv.lock is what gives that step something to check, and proves the lock resolves.
+      # Without scripts/.venv, check.sh skips its tooling step rather than failing it. Building
+      # one from the lock gives that step something to check, and proves the lock still resolves.
       - name: Create the evaluation environment
-        run: uv sync
+        run: uv sync --project scripts
 
       - name: scripts/check.sh
         run: scripts/check.sh
 
       # After the gate, not inside it: instrumentation slows the build, and coverage is a
       # measurement rather than a pass/fail. Two reports, because the two halves of this
-      # project mean different things when measured — codecov.yml explains which and why.
+      # project mean different things when measured — .github/codecov.yml explains which and why.
       - name: Measure coverage
         run: scripts/coverage.sh
 

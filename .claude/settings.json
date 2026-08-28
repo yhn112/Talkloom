@@ -5,7 +5,7 @@
       "Bash(xcodebuild:*)",
       "Bash(xcrun:*)",
       "Bash(swift build:*)",
-      "Bash(.venv/bin/python:*)",
+      "Bash(scripts/.venv/bin/python:*)",
       "Bash(uv pip install:*)",
       "Bash(uv venv:*)",
       "Bash(say:*)",

@@ -22,7 +22,7 @@ Packages/*/.swiftpm/
 *.dmg
 
 # Local environment for the Python tooling
-/.venv/
+/scripts/.venv/
 
 # ASR models — downloaded separately, gigabytes in size
 /Models/

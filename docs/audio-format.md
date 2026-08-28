@@ -29,7 +29,8 @@ rather than against a downsampled copy.
 
 `afconvert` ships with macOS, so the app acquires no Homebrew dependency it cannot satisfy on
 someone else's machine. This applies to anything Transcriber.app itself runs. `ffmpeg` stays
-available to the Python evaluation tooling in `.venv`, which only ever runs on this machine.
+available to the Python evaluation tooling in `scripts/.venv`, which only ever runs on this
+machine.
 
 ## Why the two tracks start at different times, and why the gap is kept
 

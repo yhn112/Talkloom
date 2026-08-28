@@ -40,9 +40,9 @@ the same change.
 ## Environment
 
 macOS on Apple silicon, Xcode, and the tools in `Brewfile`. Setup is `brew bundle`,
-`uv sync`, then `scripts/make-signing-cert.sh` once. `scripts/doctor.sh` prints what this
-machine actually has and names where anything missing comes from — ask it rather than
-trusting a version written down anywhere.
+`uv sync --project scripts`, then `scripts/make-signing-cert.sh` once. `scripts/doctor.sh`
+prints what this machine actually has and names where anything missing comes from — ask it
+rather than trusting a version written down anywhere.
 
 What asking the machine cannot tell you:
 
@@ -51,7 +51,7 @@ What asking the machine cannot tell you:
 - The signing certificate is local and self-signed so that TCC grants survive a rebuild.
   Ad-hoc signatures do not.
 - `swift-format` comes from `xcrun`, not Homebrew: a second copy is a second opinion.
-- `.venv` is evaluation tooling only. Nothing in it ships; the app is Swift throughout.
+- `scripts/.venv` is evaluation tooling only. Nothing in it ships; the app is Swift throughout.
 
 ## Rules
 
@@ -172,7 +172,7 @@ permanent platform, and nobody revisits it afterwards.
 
 Distinguish two cases. Something that costs the user a real decision — Xcode, a paid
 API, a developer certificate, hardware — is a question. An ordinary library or CLI tool
-is not: install it yourself (`brew`, `uv pip install` into `.venv`, a SwiftPM
+is not: install it yourself (`brew`, `uv pip install` into `scripts/.venv`, a SwiftPM
 dependency) and say that you did.
 
 ### Unfamiliar system API: read the headers before writing code
@@ -331,7 +331,7 @@ the file. Transcriber.app never reads that file, and no credential may be staged
 ### Never commit
 
 `Transcriber.xcodeproj` (generated), models (`*.bin`, `*.mlmodelc`, `*.gguf`),
-recordings (`*.wav`, `*.caf`, `*.m4a`), transcripts, `build/`, `.venv/`, API keys.
+recordings (`*.wav`, `*.caf`, `*.m4a`), transcripts, `build/`, `scripts/.venv/`, API keys.
 
 ## Git
 

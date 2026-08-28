@@ -72,18 +72,18 @@ else
 fi
 
 echo "python tooling"
-if [ -x .venv/bin/python ]; then
-    report "venv" "$(.venv/bin/python --version 2>&1)"
+if [ -x scripts/.venv/bin/python ]; then
+    report "venv" "$(scripts/.venv/bin/python --version 2>&1)"
     for module in numpy soundfile jiwer; do
-        if .venv/bin/python -c "import $module" 2>/dev/null; then
+        if scripts/.venv/bin/python -c "import $module" 2>/dev/null; then
             report "$module" "importable"
         else
-            report "$module" "MISSING — uv sync"
+            report "$module" "MISSING — uv sync --project scripts"
             missing=1
         fi
     done
 else
-    report "venv" "MISSING — uv sync"
+    report "venv" "MISSING — uv sync --project scripts"
     missing=1
 fi
 

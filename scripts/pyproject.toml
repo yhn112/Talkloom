@@ -1,9 +1,9 @@
 # The Python side of this project is tooling, not a shipped component: ASR evaluation and
-# recording analysis, run from scripts/ against a uv-managed .venv. It exists here so that
-# .venv can be rebuilt — it is not in git, and before this file nothing recorded what it
-# had to contain.
+# recording analysis. It lives in this directory, next to the scripts it serves and the
+# .venv it builds, because those three were one thing spread across two levels of the tree
+# and the repository root is not a place to keep a development dependency.
 #
-#   uv sync        # create or update .venv from uv.lock
+#   uv sync --project scripts     # create or update scripts/.venv from uv.lock
 #
 # The app ships nothing from here. Whisper runs in Swift; see PLAN.md.
 #

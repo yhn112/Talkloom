@@ -47,7 +47,7 @@ synthesis to catch gross breakage.
    very thing the measurement exists to expose:
 
    ```bash
-   .venv/bin/python scripts/wer.py --ref tests/fixtures/ru_short.txt \
+   scripts/.venv/bin/python scripts/wer.py --ref tests/fixtures/ru_short.txt \
      --hyp tests/reports/<run>/ru_short.txt --align
    ```
 

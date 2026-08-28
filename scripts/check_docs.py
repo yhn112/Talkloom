@@ -15,7 +15,7 @@ reachable from the reading list, and the rules file stays inside its size budget
 check whether prose is still true; that stays a human job.
 
 Standard library only, and run with the system interpreter — `scripts/check.sh` calls it
-before anything is built, so it must not depend on `.venv`.
+before anything is built, so it must not depend on `scripts/.venv`.
 """
 
 import plistlib

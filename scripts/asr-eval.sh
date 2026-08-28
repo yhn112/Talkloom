@@ -18,8 +18,8 @@ fi
 product=$1
 shift
 
-if [ ! -x .venv/bin/python ]; then
-    echo ".venv is missing — run uv sync" >&2
+if [ ! -x scripts/.venv/bin/python ]; then
+    echo "scripts/.venv is missing — run uv sync --project scripts" >&2
     exit 127
 fi
 
@@ -64,7 +64,7 @@ for fixture in "${fixtures[@]}"; do
         continue
     fi
 
-    .venv/bin/python - "$report" "$hypothesis" <<'PY'
+    scripts/.venv/bin/python - "$report" "$hypothesis" <<'PY'
 import json
 import sys
 
@@ -91,7 +91,7 @@ PY
     fi
 
     if [ -n "$(tr -d '[:space:]' <"$reference")" ]; then
-        .venv/bin/python scripts/wer.py \
+        scripts/.venv/bin/python scripts/wer.py \
             --ref "$reference" --hyp "$hypothesis" --align \
             | tee "$report_directory/$fixture.metrics.txt"
     elif [ -n "$(tr -d '[:space:]' <"$hypothesis")" ]; then

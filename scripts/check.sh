@@ -55,8 +55,8 @@ ok
 
 # 4. The evaluation tooling. Python front ends must still import and parse their arguments;
 # shell entry points must still parse. An edit then fails here rather than when someone
-# reaches for the tool mid-diagnosis. .venv is a derived local artifact, so a missing one is
-# skipped rather than failed — `uv sync` creates it.
+# reaches for the tool mid-diagnosis. scripts/.venv is a derived local artifact, so a missing one
+# is skipped rather than failed — `uv sync --project scripts` creates it.
 #
 # One file per call, and every file. `bash -n a.sh b.sh` parses only a.sh — b.sh becomes its
 # $1 — so the two-argument form this used to have exited zero without ever reading the second
@@ -93,10 +93,10 @@ if leaked=$(git grep -nIE 'sk-or-v1-[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{32,}|gh[pous
     echo "$leaked" | sed 's/^/    /'
     exit 1
 fi
-if [ -x .venv/bin/python ]; then
+if [ -x scripts/.venv/bin/python ]; then
     broken=""
     for script in wer audio_check track_compare; do
-        .venv/bin/python "scripts/$script.py" --help >/dev/null 2>&1 || broken="$broken $script.py"
+        scripts/.venv/bin/python "scripts/$script.py" --help >/dev/null 2>&1 || broken="$broken $script.py"
     done
     if [ -z "$broken" ]; then
         ok
@@ -107,7 +107,7 @@ if [ -x .venv/bin/python ]; then
         exit 1
     fi
 else
-    ok "skipped, no .venv"
+    ok "skipped, no scripts/.venv"
 fi
 
 # 5. Formatting. swift-format has no --check mode, so the tree is formatted into a copy and

@@ -13,7 +13,8 @@ brew "xcsift"
 # Audits the workflows for the failures that never turn CI red: an action pinned to a
 # movable tag, a token left in .git/config, an expression that interpolates untrusted input.
 brew "zizmor"
-# The Python tooling for ASR evaluation and recording analysis lives in a uv-managed .venv.
+# The Python tooling for ASR evaluation and recording analysis lives in scripts/, beside the
+# uv manifest that pins it.
 brew "uv"
 # Evaluation tooling only. The app itself uses afconvert, which ships with macOS, so that
 # it acquires no Homebrew dependency it cannot satisfy on someone else's machine.

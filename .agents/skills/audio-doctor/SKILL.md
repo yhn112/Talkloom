@@ -13,7 +13,7 @@ appearance of a file.
 ## First measurement
 
 ```bash
-.venv/bin/python scripts/audio_check.py Recordings/<meeting>/mic.wav Recordings/<meeting>/system.wav
+scripts/.venv/bin/python scripts/audio_check.py Recordings/<meeting>/mic.wav Recordings/<meeting>/system.wav
 ```
 
 The script prints format, peak and RMS in dBFS, the share of silence over 20 ms windows,
