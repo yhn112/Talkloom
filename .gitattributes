@@ -1,0 +1,5 @@
+# Brewfile is a Homebrew bundle, written in Ruby's DSL, and Linguist classifies it by syntax.
+# Those 969 bytes were the whole of the "Ruby" this repository reports, and CodeQL's default
+# setup believed them: it added a Ruby analysis that had nothing to read and failed. The file
+# is configuration rather than a program, so it is not a language this project is written in.
+Brewfile linguist-detectable=false
