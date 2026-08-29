@@ -11,6 +11,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Packages/*/.build is a build product; swift-format would happily walk into it.
 xcrun swift-format format --parallel --in-place --recursive \
-    Sources Tests Packages/TranscriberCore/Sources Packages/TranscriberCore/Tests \
-    Packages/TranscriberCore/Package.swift
+    Sources Tests Packages/TalkloomCore/Sources Packages/TalkloomCore/Tests \
+    Packages/TalkloomCore/Package.swift
 echo "formatted Sources, Tests and Packages"

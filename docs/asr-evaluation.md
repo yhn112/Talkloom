@@ -15,7 +15,7 @@ file. `AppleSpeechASREval` has no credential and instead needs its on-device mod
 once per locale, which its `--install-assets` flag does.
 The shared runner owns the ignored report layout;
 [`Tests/fixtures/README.md`](../Tests/fixtures/README.md) owns the local setup and
-fixture-generation entry point. Transcriber.app reads neither the evaluation key file nor the
+fixture-generation entry point. Talkloom.app reads neither the evaluation key file nor the
 environment and still requires a Keychain credential before it can construct a cloud request.
 
 ## Why VAD is mandatory

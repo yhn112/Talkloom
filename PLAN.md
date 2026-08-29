@@ -1,4 +1,4 @@
-# Transcriber — project plan
+# Talkloom — project plan
 
 A local meeting transcriber for macOS: a menu-bar app that records the microphone and
 system audio during any call (Zoom, Meet, Telegram — anything), transcribes locally with

@@ -11,6 +11,6 @@ These voices are synthetic. They detect broken request, language, silence and ti
 behavior, but they are not evidence that a model is good enough for real meetings. Model
 selection still needs real Russian and English excerpts with noise and interruptions.
 
-The evaluation executable is not linked into Transcriber.app. The runner refuses to proceed
+The evaluation executable is not linked into Talkloom.app. The runner refuses to proceed
 with a missing or committable key file but never reads it; the evaluator alone reads the fixed
 file. This does not weaken the app's eventual Keychain-only credential rule.

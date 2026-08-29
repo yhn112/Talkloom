@@ -7,7 +7,7 @@
 # else — and a Release build, which the local gate never makes.
 #
 # Device tests are absent by construction. They live in their own schemes behind
-# TRANSCRIBER_DEVICE_TESTS, need a microphone, and make audible noise.
+# TALKLOOM_DEVICE_TESTS, need a microphone, and make audible noise.
 name: build
 
 on:
@@ -86,7 +86,7 @@ jobs:
       - name: Release build
         shell: bash
         run: |
-          xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+          xcodebuild -project Talkloom.xcodeproj -scheme Talkloom \
             -configuration Release -derivedDataPath build-release build \
             | xcsift -f toon -w -E
 
@@ -104,15 +104,15 @@ jobs:
       - name: Package the app
         run: |
           stage="$(mktemp -d)"
-          ditto build-release/Build/Products/Release/Transcriber.app "$stage/Transcriber.app"
+          ditto build-release/Build/Products/Release/Talkloom.app "$stage/Talkloom.app"
           ln -s /Applications "$stage/Applications"
-          hdiutil create -volname Transcriber -ov -format UDZO -quiet \
-            -srcfolder "$stage" Transcriber.dmg
+          hdiutil create -volname Talkloom -ov -format UDZO -quiet \
+            -srcfolder "$stage" Talkloom.dmg
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Transcriber-${{ github.sha }}
-          path: Transcriber.dmg
+          name: Talkloom-${{ github.sha }}
+          path: Talkloom.dmg
           retention-days: 14
 
       # A rolling prerelease rather than one release per tag. There is nothing to version yet
@@ -128,7 +128,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest Transcriber.dmg \
+          gh release create latest Talkloom.dmg \
             --prerelease \
             --title "Latest build ($(git rev-parse --short HEAD))" \
             --notes-file .github/release-notes.md

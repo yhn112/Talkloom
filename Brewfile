@@ -5,7 +5,7 @@
 # swift-format is deliberately absent too — it ships inside Xcode and is reached through
 # `xcrun`, so a Homebrew copy would only introduce a second version to disagree with.
 
-# Generates Transcriber.xcodeproj from project.yml.
+# Generates Talkloom.xcodeproj from project.yml.
 brew "xcodegen"
 # Collapses xcodebuild output to the errors. Measured at 98 kB against 127 bytes for a
 # green run, which is the difference between an agent reading the failure and not.

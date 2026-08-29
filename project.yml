@@ -1,7 +1,7 @@
 # XcodeGen project definition — the source of truth instead of .xcodeproj.
 # Edit here, then run `xcodegen generate`. The .xcodeproj is not kept in git.
 
-name: Transcriber
+name: Talkloom
 
 options:
   bundleIdPrefix: me.diskin
@@ -33,9 +33,11 @@ settings:
     # A local self-signed certificate stays stable across builds, so TCC grants survive.
     # See scripts/make-signing-cert.sh
     CODE_SIGN_STYLE: Manual
+    # Keep the historical identity: changing it would invalidate the TCC grants tied to
+    # locally built copies of the app. The product name does not need to match a certificate.
     CODE_SIGN_IDENTITY: "Transcriber Dev"
     DEVELOPMENT_TEAM: ""
-    # Xcode splits the app into a stub plus Transcriber.debug.dylib to support SwiftUI
+    # Xcode splits the app into a stub plus Talkloom.debug.dylib to support SwiftUI
     # Previews. dyld then refuses to load that dylib into the app because a self-signed
     # certificate carries no Team ID, and "unset" does not count as a match. Previews
     # need the Xcode GUI anyway, so turn the split off and keep one signed binary.
@@ -53,36 +55,38 @@ settings:
 packages:
   # The hardware-free boundary described in AGENTS.md. A local package rather than a folder
   # in the app target so its tests run without xcodebuild, signing, or a test host.
-  TranscriberCore:
-    path: Packages/TranscriberCore
+  TalkloomCore:
+    path: Packages/TalkloomCore
 
 targets:
-  Transcriber:
+  Talkloom:
     type: application
     platform: macOS
     sources:
       # Created in stage 0 (see PLAN.md); generation fails until it exists.
-      - path: Sources/Transcriber
+      - path: Sources/Talkloom
       - path: Resources/Assets.xcassets
     settings:
       base:
-        PRODUCT_NAME: Transcriber
+        PRODUCT_NAME: Talkloom
+        # Stable application identity, deliberately independent from the product name.
+        # Changing it would reset microphone and system-audio grants on existing installs.
         PRODUCT_BUNDLE_IDENTIFIER: me.diskin.Transcriber
         INFOPLIST_FILE: Resources/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Resources/Transcriber.entitlements
+        CODE_SIGN_ENTITLEMENTS: Resources/Talkloom.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - sdk: AVFoundation.framework
       - sdk: CoreAudio.framework
-      - package: TranscriberCore
+      - package: TalkloomCore
 
-  TranscriberTests:
+  TalkloomTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: Tests/TranscriberTests
+      - path: Tests/TalkloomTests
     dependencies:
-      - target: Transcriber
+      - target: Talkloom
     settings:
       base:
         # The app bundle uses the checked-in Resources/Info.plist; a test bundle has no
@@ -93,46 +97,46 @@ targets:
         # identity differs from the host's.
 
 schemes:
-  Transcriber:
+  Talkloom:
     build:
       targets:
-        Transcriber: all
-        TranscriberTests: [test]
+        Talkloom: all
+        TalkloomTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - TranscriberTests
+        - TalkloomTests
 
   # The tests that record from the real microphone. They are a separate scheme rather than
   # an environment variable on the command line because xcodebuild does not forward the
   # shell's environment to the test host — the variable has to come from the scheme.
   # Opt-in, since they need a microphone and make audible noise.
-  TranscriberDeviceTests:
+  TalkloomDeviceTests:
     build:
       targets:
-        Transcriber: all
-        TranscriberTests: [test]
+        Talkloom: all
+        TalkloomTests: [test]
     test:
       config: Debug
       targets:
-        - TranscriberTests
+        - TalkloomTests
       environmentVariables:
-        TRANSCRIBER_DEVICE_TESTS: "1"
+        TALKLOOM_DEVICE_TESTS: "1"
 
   # The capture-restart test includes a timed manual output-device switch. Keep it out of
   # ordinary device runs so a person is never surprised by an interactive hardware test.
-  TranscriberDeviceSwitchTests:
+  TalkloomDeviceSwitchTests:
     build:
       targets:
-        Transcriber: all
-        TranscriberTests: [test]
+        Talkloom: all
+        TalkloomTests: [test]
     test:
       config: Debug
       targets:
-        - TranscriberTests
+        - TalkloomTests
       environmentVariables:
-        TRANSCRIBER_DEVICE_TESTS: "1"
-        TRANSCRIBER_DEVICE_SWITCH_TEST: "1"
-        TRANSCRIBER_DEVICE_SWITCH_ROOT: "/tmp/TranscriberDeviceSwitchRecording"
+        TALKLOOM_DEVICE_TESTS: "1"
+        TALKLOOM_DEVICE_SWITCH_TEST: "1"
+        TALKLOOM_DEVICE_SWITCH_ROOT: "/tmp/TalkloomDeviceSwitchRecording"

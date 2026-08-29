@@ -1,6 +1,6 @@
 # Apple's Speech framework: evaluated, not used
 
-**Decision: Transcriber does not use `Speech` — not for recognition, not for endpointing, not
+**Decision: Talkloom does not use `Speech` — not for recognition, not for endpointing, not
 as an evaluation comparator.** This file exists so the exploration is not repeated. It records
 what the framework offers, what it measured, and why that was not enough.
 

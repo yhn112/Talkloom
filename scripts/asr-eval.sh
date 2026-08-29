@@ -28,16 +28,16 @@ if [ ${#fixtures[@]} -eq 0 ]; then
     fixtures=(ru_short en_short mixed_short ru_terms long_pause silence)
 fi
 
-run_id=${TRANSCRIBER_ASR_RUN_ID:-"$product-$(date -u +%Y%m%dT%H%M%SZ)"}
+run_id=${TALKLOOM_ASR_RUN_ID:-"$product-$(date -u +%Y%m%dT%H%M%SZ)"}
 report_directory="Tests/reports/$run_id"
 
-swift build --package-path Packages/TranscriberCore --product "$product" >/dev/null
-binary_directory=$(swift build --package-path Packages/TranscriberCore --show-bin-path)
+swift build --package-path Packages/TalkloomCore --product "$product" >/dev/null
+binary_directory=$(swift build --package-path Packages/TalkloomCore --show-bin-path)
 binary="$binary_directory/$product"
 
 mkdir -p Tests/reports
 if ! mkdir "$report_directory" 2>/dev/null; then
-    echo "$report_directory already exists — choose a new TRANSCRIBER_ASR_RUN_ID" >&2
+    echo "$report_directory already exists — choose a new TALKLOOM_ASR_RUN_ID" >&2
     exit 1
 fi
 

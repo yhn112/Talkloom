@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Create a local self-signed certificate for signing Transcriber.app.
+# Create a local self-signed certificate for signing Talkloom.app.
 #
 # Why: macOS binds granted permissions (microphone, system audio capture) to the app's
 # signature. With ad-hoc signing every rebuild changes the cdhash, the system treats the
@@ -11,6 +11,7 @@
 #
 set -euo pipefail
 
+# The historical identity stays stable so existing TCC grants survive the product rename.
 CERT_NAME="Transcriber Dev"
 KEYCHAIN="${HOME}/Library/Keychains/login.keychain-db"
 DAYS=3650

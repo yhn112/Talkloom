@@ -18,7 +18,7 @@
 [project]
 name = "transcriber-tooling"
 version = "0.1.0"
-description = "ASR evaluation and recording analysis for Transcriber"
+description = "ASR evaluation and recording analysis for Talkloom"
 # 3.13 is what the toolchain on this machine provides; nothing here needs anything newer.
 requires-python = ">=3.13"
 dependencies = [

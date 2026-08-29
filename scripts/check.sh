@@ -136,9 +136,9 @@ fi
 # run first and in about a second: a broken WAV header should not cost a full app build to
 # discover.
 step package
-if summary=$(swift test --package-path Packages/TranscriberCore 2>&1 | xcsift -f toon -w -E) \
-    && swift build --package-path Packages/TranscriberCore --product OpenRouterASREval >/dev/null \
-    && probe_directory=$(swift build --package-path Packages/TranscriberCore --show-bin-path) \
+if summary=$(swift test --package-path Packages/TalkloomCore 2>&1 | xcsift -f toon -w -E) \
+    && swift build --package-path Packages/TalkloomCore --product OpenRouterASREval >/dev/null \
+    && probe_directory=$(swift build --package-path Packages/TalkloomCore --show-bin-path) \
     && "$probe_directory/OpenRouterASREval" --help >/dev/null; then
     ok "$(echo "$summary" | awk '/passed_tests:/ {print $2" tests"}')"
 else
@@ -152,7 +152,7 @@ fi
 # 98 kB for a green run against 127 bytes — while -E preserves the failure exit code, which
 # the pipeline would otherwise swallow.
 step build+test
-if summary=$(xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+if summary=$(xcodebuild -project Talkloom.xcodeproj -scheme Talkloom \
     -configuration Debug -derivedDataPath build test 2>&1 | xcsift -f toon -w -E); then
     ok "$(echo "$summary" | awk '/passed_tests:/ {t=$2} /warnings:/ {w=$2} END {print t" tests, "w" warnings"}')"
 else

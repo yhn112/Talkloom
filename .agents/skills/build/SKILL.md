@@ -1,6 +1,6 @@
 ---
 name: build
-description: Build, sign, and launch Transcriber.app, run the tests, and read the app's logs. Use after code changes, when a change needs checking in the running app, and when the app won't launch or misbehaves. Do not use to diagnose recording quality — that is audio-doctor.
+description: Build, sign, and launch Talkloom.app, run the tests, and read the app's logs. Use after code changes, when a change needs checking in the running app, and when the app won't launch or misbehaves. Do not use to diagnose recording quality — that is audio-doctor.
 ---
 
 # Building, testing, and running
@@ -38,11 +38,11 @@ the check.
    path helps TCC treat it as the same application across builds:
 
    ```bash
-   xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+   xcodebuild -project Talkloom.xcodeproj -scheme Talkloom \
      -configuration Debug -derivedDataPath build build 2>&1 | xcsift -f toon -E
    ```
 
-   The bundle lands at `build/Build/Products/Debug/Transcriber.app`.
+   The bundle lands at `build/Build/Products/Debug/Talkloom.app`.
 
    `xcsift` turns xcodebuild's output into a few lines of errors with file and line —
    measured at 98 kB against 127 bytes for a green test run. `-E` is not optional: a
@@ -53,8 +53,8 @@ the check.
    garbage in both recordings:
 
    ```bash
-   pkill -f Transcriber.app/Contents/MacOS/Transcriber || true
-   open build/Build/Products/Debug/Transcriber.app
+   pkill -f Talkloom.app/Contents/MacOS/Talkloom || true
+   open build/Build/Products/Debug/Talkloom.app
    ```
 
 4. **Watch the logs.** This is a menu-bar app with no console window, so this is the only
@@ -78,13 +78,13 @@ The package first — it is a second, and it covers the WAV writer, the mach-tim
 conversion and the manifest:
 
 ```bash
-swift test --package-path Packages/TranscriberCore
+swift test --package-path Packages/TalkloomCore
 ```
 
 Then the app's own tests, which need the project, the bundle and its signature:
 
 ```bash
-xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+xcodebuild -project Talkloom.xcodeproj -scheme Talkloom \
   -derivedDataPath build test 2>&1 | xcsift -f toon -w -E
 ```
 
@@ -121,19 +121,19 @@ which is the only part that says which access raced.
 ### Tests that use the real microphone
 
 Capture code is only verified against a real recording, so those tests live in the
-`TranscriberDeviceTests` scheme and are skipped by every other run:
+`TalkloomDeviceTests` scheme and are skipped by every other run:
 
 ```bash
-xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceTests \
+xcodebuild -project Talkloom.xcodeproj -scheme TalkloomDeviceTests \
   -derivedDataPath build test \
-  -only-testing:TranscriberTests/DeviceTests/Microphone
+  -only-testing:TalkloomTests/DeviceTests/Microphone
 ```
 
 The suites are `Microphone`, `SystemAudio`, `Controller`, `StartupLatency`,
 `VoiceProcessingLayout` and `Ducking`, and the `DeviceTests/` in the middle is not
 optional: they are nested inside that suite so `.serialized` can keep two captures from
 running at once. **An identifier that matches nothing runs zero tests and reports
-success** — `-only-testing:TranscriberTests/Microphone` exits 0 having done nothing at
+success** — `-only-testing:TalkloomTests/Microphone` exits 0 having done nothing at
 all. Check the count in the output (`Test run with N tests`) rather than the exit status.
 
 Ducking is the slow one: nine four-second measurements of a 440 Hz tone, about a minute of
@@ -149,7 +149,7 @@ would be summarised away and the commit would have no numbers to carry. Read the
 output here, or `tee` it to a file.
 
 A separate scheme rather than an environment variable on the command line: `xcodebuild`
-does not forward the shell's environment to the test host, so `TRANSCRIBER_DEVICE_TESTS`
+does not forward the shell's environment to the test host, so `TALKLOOM_DEVICE_TESTS`
 has to come from the scheme itself.
 
 The output-device restart check is interactive and has a stronger cleanup requirement: a
