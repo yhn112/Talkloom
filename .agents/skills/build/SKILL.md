@@ -61,7 +61,7 @@ the check.
    way to see what it is doing:
 
    ```bash
-   log stream --predicate 'subsystem == "me.diskin.Transcriber"' --level debug
+   log stream --predicate 'subsystem == "me.diskin.Talkloom"' --level debug
    ```
 
    Start the stream *before* launching the app. Debug and info messages live in an

@@ -5,11 +5,10 @@ import os
 /// This is a menu-bar app with no console, so the unified log is the only way to observe
 /// it. Stream it with:
 ///
-///     log stream --predicate 'subsystem == "me.diskin.Transcriber"' --level debug
+///     log stream --predicate 'subsystem == "me.diskin.Talkloom"' --level debug
 ///
 enum AppLog {
-    // Match the stable bundle identifier so existing diagnostic commands keep working.
-    static let subsystem = "me.diskin.Transcriber"
+    static let subsystem = "me.diskin.Talkloom"
 
     static let app = Logger(subsystem: subsystem, category: "app")
     static let permissions = Logger(subsystem: subsystem, category: "permissions")

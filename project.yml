@@ -69,9 +69,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Talkloom
-        # Stable application identity, deliberately independent from the product name.
-        # Changing it would reset microphone and system-audio grants on existing installs.
-        PRODUCT_BUNDLE_IDENTIFIER: me.diskin.Transcriber
+        PRODUCT_BUNDLE_IDENTIFIER: me.diskin.Talkloom
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/Talkloom.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

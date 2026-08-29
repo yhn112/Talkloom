@@ -49,8 +49,7 @@ public struct RecordingSession: Equatable, Sendable {
             appropriateFor: nil,
             create: true
         )
-        // Keep the original storage path so existing recordings remain visible after renames.
-        return appSupport.appending(path: "Transcriber/Recordings", directoryHint: .isDirectory)
+        return appSupport.appending(path: "Talkloom/Recordings", directoryHint: .isDirectory)
     }
 
     /// Creates the directory for a new session.
