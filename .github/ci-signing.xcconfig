@@ -1,6 +1,6 @@
 // Signing for CI, applied through XCODE_XCCONFIG_FILE in .github/workflows/build.yml.
 //
-// project.yml pins CODE_SIGN_IDENTITY to "Transcriber Dev", and that certificate exists for
+// project.yml keeps the historical CODE_SIGN_IDENTITY "Transcriber Dev", which exists for
 // exactly one reason: macOS binds microphone and audio-capture grants to a signature, so a
 // stable certificate keeps TCC grants alive across rebuilds (scripts/make-signing-cert.sh).
 // A runner holds no grants and records nothing, so the reason does not reach it. Importing a

@@ -22,7 +22,7 @@ done
 
 fixture_directory="Tests/fixtures"
 mkdir -p "$fixture_directory"
-scratch=$(mktemp -d /tmp/TranscriberASRFixtures.XXXXXX)
+scratch=$(mktemp -d /tmp/TalkloomASRFixtures.XXXXXX)
 trap 'rm -rf "$scratch"' EXIT
 
 say_wave() {

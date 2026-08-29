@@ -6,8 +6,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-recording_root=/tmp/TranscriberDeviceSwitchRecording
-run_root=$(mktemp -d /tmp/TranscriberDeviceSwitchRun.XXXXXX)
+recording_root=/tmp/TalkloomDeviceSwitchRecording
+run_root=$(mktemp -d /tmp/TalkloomDeviceSwitchRun.XXXXXX)
 marker="$run_root/start.marker"
 result_bundle="$run_root/result.xcresult"
 log="$run_root/xcodebuild.log"
@@ -15,11 +15,11 @@ temp_root=${TMPDIR:-/tmp}
 temp_root=${temp_root%/}
 
 case "$run_root" in
-    /tmp/TranscriberDeviceSwitchRun.*) ;;
+    /tmp/TalkloomDeviceSwitchRun.*) ;;
     *) echo "unexpected run directory: $run_root" >&2; exit 2 ;;
 esac
 case "$recording_root" in
-    /tmp/TranscriberDeviceSwitchRecording) ;;
+    /tmp/TalkloomDeviceSwitchRecording) ;;
     *) echo "unexpected recording directory: $recording_root" >&2; exit 2 ;;
 esac
 case "$temp_root" in
@@ -46,14 +46,14 @@ cleanup() {
     pkill -f '^/usr/bin/say -r 165 Before the device switch\.' 2>/dev/null || true
     pkill -f '^/usr/bin/say -r 145 Switch the output device now' 2>/dev/null || true
     pkill -f '^/usr/bin/say -r 165 After the device switch\.' 2>/dev/null || true
-    pkill -f '^/usr/bin/afplay .*Transcriber-system-probe-' 2>/dev/null || true
+    pkill -f '^/usr/bin/afplay .*Talkloom-system-probe-' 2>/dev/null || true
 
     while IFS= read -r probe; do
         case "$probe" in
-            "$temp_root"/Transcriber-system-probe-*.wav) rm -f -- "$probe" ;;
+            "$temp_root"/Talkloom-system-probe-*.wav) rm -f -- "$probe" ;;
         esac
     done < <(
-        find "$temp_root" -maxdepth 1 -type f -name 'Transcriber-system-probe-*.wav' \
+        find "$temp_root" -maxdepth 1 -type f -name 'Talkloom-system-probe-*.wav' \
             -newer "$marker" -print
     )
 
@@ -66,13 +66,13 @@ trap cleanup EXIT INT TERM
 # A previous crashed run owns this exact project-specific directory. Clearing it before the
 # next run makes the harness safe to invoke twice after failure.
 remove_recording
-pkill -f 'Transcriber.app/Contents/MacOS/Transcriber' 2>/dev/null || true
+pkill -f 'Talkloom.app/Contents/MacOS/Talkloom' 2>/dev/null || true
 xcodegen generate --quiet
 
 set +e
-xcodebuild -project Transcriber.xcodeproj -scheme TranscriberDeviceSwitchTests \
+xcodebuild -project Talkloom.xcodeproj -scheme TalkloomDeviceSwitchTests \
     -derivedDataPath build -resultBundlePath "$result_bundle" test \
-    '-only-testing:TranscriberTests/DeviceTests/Controller/outputDeviceSwitchPreservesBothLogicalTracks()' \
+    '-only-testing:TalkloomTests/DeviceTests/Controller/outputDeviceSwitchPreservesBothLogicalTracks()' \
     2>&1 | tee "$log"
 test_status=${PIPESTATUS[0]}
 set -e

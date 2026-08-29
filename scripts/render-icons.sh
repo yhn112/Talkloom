@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-app_icon_source="Resources/Brand/TranscriberIcon.svg"
+app_icon_source="Resources/Brand/TalkloomIcon.svg"
 glyph_source="Resources/Brand/OpenRibbon.svg"
 app_icon_directory="Resources/Assets.xcassets/AppIcon.appiconset"
 menu_bar_directory="Resources/Assets.xcassets/MenuBarIcon.imageset"
@@ -18,7 +18,7 @@ render() {
         "$app_icon_source" --out "$destination" >/dev/null
 }
 
-render 1024 Resources/Brand/TranscriberIcon.png
+render 1024 Resources/Brand/TalkloomIcon.png
 
 while read -r size filename; do
     render "$size" "$app_icon_directory/$filename"

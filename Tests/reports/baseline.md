@@ -349,7 +349,7 @@ recording, and nothing public carries both. A recording made here is what closes
 
 ## Real recording pipeline probe
 
-A same-day manual probe started with a recording made by Transcriber.app while real Russian
+A same-day manual probe started with a recording made by Talkloom.app while real Russian
 speech played through the current output device and the user spoke into the microphone. This
 was not a product end-to-end run: after the app finalized the masters, the diagnostic steps
 invoked `audio_check.py`, `afconvert` and `OpenRouterASREval` separately. No reference

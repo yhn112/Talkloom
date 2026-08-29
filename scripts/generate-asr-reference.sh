@@ -28,8 +28,8 @@ if [ ! -x scripts/.venv/bin/python ]; then
     exit 127
 fi
 
-swift build --package-path Packages/TranscriberCore --product OpenRouterASREval >/dev/null
-binary="$(swift build --package-path Packages/TranscriberCore --show-bin-path)/OpenRouterASREval"
+swift build --package-path Packages/TalkloomCore --product OpenRouterASREval >/dev/null
+binary="$(swift build --package-path Packages/TalkloomCore --show-bin-path)/OpenRouterASREval"
 
 for audio in "$@"; do
     if [ ! -f "$audio" ]; then
@@ -52,11 +52,11 @@ for audio in "$@"; do
 
     checksum=$(shasum -a 256 "$audio" | cut -d' ' -f1)
     generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    TRANSCRIBER_AUDIO="$audio" \
-    TRANSCRIBER_REFERENCE="$reference" \
-    TRANSCRIBER_SIDECAR="$sidecar" \
-    TRANSCRIBER_CHECKSUM="$checksum" \
-    TRANSCRIBER_GENERATED_AT="$generated_at" \
+    TALKLOOM_AUDIO="$audio" \
+    TALKLOOM_REFERENCE="$reference" \
+    TALKLOOM_SIDECAR="$sidecar" \
+    TALKLOOM_CHECKSUM="$checksum" \
+    TALKLOOM_GENERATED_AT="$generated_at" \
         scripts/.venv/bin/python - "$report" <<'PY'
 import json
 import os
@@ -67,22 +67,22 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 result = report["result"]
 text = " ".join(segment["text"] for segment in result["segments"]).strip()
 
-with open(os.environ["TRANSCRIBER_REFERENCE"], "w", encoding="utf-8") as handle:
+with open(os.environ["TALKLOOM_REFERENCE"], "w", encoding="utf-8") as handle:
     handle.write(text + "\n")
 
 sidecar = {
-    "audio": os.path.basename(os.environ["TRANSCRIBER_AUDIO"]),
-    "audioSHA256": os.environ["TRANSCRIBER_CHECKSUM"],
+    "audio": os.path.basename(os.environ["TALKLOOM_AUDIO"]),
+    "audioSHA256": os.environ["TALKLOOM_CHECKSUM"],
     "engine": "OpenRouterASREval",
     "model": result["model"],
-    "generatedAt": os.environ["TRANSCRIBER_GENERATED_AT"],
+    "generatedAt": os.environ["TALKLOOM_GENERATED_AT"],
     "note": "Machine-generated reference. See docs/asr-evaluation.md for what it may score.",
 }
-with open(os.environ["TRANSCRIBER_SIDECAR"], "w", encoding="utf-8") as handle:
+with open(os.environ["TALKLOOM_SIDECAR"], "w", encoding="utf-8") as handle:
     json.dump(sidecar, handle, ensure_ascii=False, indent=2, sort_keys=True)
     handle.write("\n")
 
-print(f"  {os.environ['TRANSCRIBER_REFERENCE']}: {len(text.split())} words")
+print(f"  {os.environ['TALKLOOM_REFERENCE']}: {len(text.split())} words")
 PY
     rm -f "$report"
     trap - EXIT

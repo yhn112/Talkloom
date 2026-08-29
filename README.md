@@ -1,12 +1,12 @@
-# Transcriber
+# Talkloom
 
 <p align="center">
-  <img src="Resources/Brand/TranscriberIcon.png" alt="Transcriber icon" width="144">
+  <img src="Resources/Brand/TalkloomIcon.png" alt="Talkloom icon" width="144">
 </p>
 
-[![build](https://github.com/yhn112/Transcriber/actions/workflows/build.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/build.yml)
-[![codeql](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml/badge.svg)](https://github.com/yhn112/Transcriber/actions/workflows/codeql.yml)
-[![codecov](https://codecov.io/gh/yhn112/Transcriber/branch/main/graph/badge.svg)](https://codecov.io/gh/yhn112/Transcriber)
+[![build](https://github.com/yhn112/Talkloom/actions/workflows/build.yml/badge.svg)](https://github.com/yhn112/Talkloom/actions/workflows/build.yml)
+[![codeql](https://github.com/yhn112/Talkloom/actions/workflows/codeql.yml/badge.svg)](https://github.com/yhn112/Talkloom/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/yhn112/Talkloom/branch/main/graph/badge.svg)](https://codecov.io/gh/yhn112/Talkloom)
 [![macOS 15.0+](https://img.shields.io/badge/macOS-15.0%2B-lightgrey.svg)](project.yml)
 [![Swift 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg)](project.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -33,7 +33,7 @@ names the current stage and the criterion that ends it.
 
 Requires macOS on Apple silicon and Xcode. The environment, the setup commands, and the
 rules that govern changes are in [`AGENTS.md`](AGENTS.md); `scripts/doctor.sh` reports what
-this machine is missing and where each piece comes from. `Transcriber.xcodeproj` is
+this machine is missing and where each piece comes from. `Talkloom.xcodeproj` is
 generated from `project.yml` by XcodeGen and is deliberately not in the repository.
 
 ## Running a build
@@ -44,7 +44,7 @@ are ad-hoc signed and deliberately not notarized — this project is not distrib
 quarantines the image on download and refuses to open it. Drag the app to Applications, then:
 
 ```bash
-sudo xattr -dr com.apple.quarantine /Applications/Transcriber.app
+sudo xattr -dr com.apple.quarantine /Applications/Talkloom.app
 ```
 
 ## Permissions

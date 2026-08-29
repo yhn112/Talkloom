@@ -1,6 +1,6 @@
 # Two flags, because this project has two halves that mean different things when measured.
 #
-# `core` is Packages/TranscriberCore — the code that exists specifically to be verifiable
+# `core` is Packages/TalkloomCore — the code that exists specifically to be verifiable
 # without hardware, and the only place where a coverage figure is a statement about the tests.
 # `app` is everything that touches CoreAudio, AVFoundation and the UI; the tests that reach it
 # need a microphone, live in the DeviceTests suite, and are excluded from every automated run
@@ -31,10 +31,10 @@ coverage:
 flags:
   core:
     paths:
-      - Packages/TranscriberCore/Sources/
+      - Packages/TalkloomCore/Sources/
   app:
     paths:
-      - Sources/Transcriber/
+      - Sources/Talkloom/
 
 comment:
   layout: "flags, files"

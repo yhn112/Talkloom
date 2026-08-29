@@ -27,7 +27,7 @@ silence well under 90%.
 ## From symptom to cause
 
 **Both tracks empty.** The app never received permission. Check whether the system
-prompted at all, then grant again: `tccutil reset Microphone me.diskin.Transcriber`, the
+prompted at all, then grant again: `tccutil reset Microphone me.diskin.Talkloom`, the
 same for `AudioCapture`, then restart the app. A silent denial with no dialog usually
 means the bundle signature changed.
 

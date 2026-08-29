@@ -8,7 +8,7 @@ Two consequences follow, and neither is a fault in the build.
 Applications, then:
 
 ```bash
-sudo xattr -dr com.apple.quarantine /Applications/Transcriber.app
+sudo xattr -dr com.apple.quarantine /Applications/Talkloom.app
 ```
 
 **Permissions do not carry over from the build before.** macOS binds the microphone and

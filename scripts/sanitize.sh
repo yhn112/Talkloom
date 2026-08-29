@@ -8,7 +8,7 @@
 #
 # Thread and address sanitizers cannot be enabled together, so each is its own run.
 #
-# Device tests are deliberately out of scope. The `Transcriber` scheme excludes them, and
+# Device tests are deliberately out of scope. The `Talkloom` scheme excludes them, and
 # that is the point: instrumentation slows the audio callback enough to produce dropouts,
 # which would be an artefact of the measurement rather than a finding.
 #
@@ -60,13 +60,13 @@ run() { # run <label> <command...>
 for sanitizer in "${SANITIZERS[@]}"; do
     echo "== $sanitizer sanitizer =="
 
-    run "package" swift test --package-path Packages/TranscriberCore --sanitize="$sanitizer"
+    run "package" swift test --package-path Packages/TalkloomCore --sanitize="$sanitizer"
 
     case "$sanitizer" in
         thread) flag=-enableThreadSanitizer ;;
         address) flag=-enableAddressSanitizer ;;
     esac
 
-    run "app (hardware-free)" xcodebuild -project Transcriber.xcodeproj -scheme Transcriber \
+    run "app (hardware-free)" xcodebuild -project Talkloom.xcodeproj -scheme Talkloom \
         -configuration Debug -derivedDataPath "$DERIVED" test "$flag" YES
 done

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Transcriber</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Transcriber</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleExecutable</key>
-	<string>Transcriber</string>
+	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,8 +26,8 @@
 	<!-- Permission prompt copy. Shown to the user in a system dialog, so it explains
 	     the benefit rather than the technical reason. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Transcriber records your voice to transcribe the meeting. Recordings stay on this Mac.</string>
+	<string>Talkloom records your voice to transcribe the meeting. Recordings stay on this Mac.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Transcriber records the call audio to transcribe what other participants say. Recordings stay on this Mac.</string>
+	<string>Talkloom records the call audio to transcribe what other participants say. Recordings stay on this Mac.</string>
 </dict>
 </plist>

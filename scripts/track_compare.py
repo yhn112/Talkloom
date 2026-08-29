@@ -6,7 +6,7 @@ questions that only make sense across both: how far apart they started, how much
 of the system audio leaked into the microphone, and whether echo cancellation is
 cutting into the near speaker as well as the far one.
 
-    scripts/track_compare.py ~/Library/Application\\ Support/Transcriber/Recordings/2026-08-24_20-29-44
+    scripts/track_compare.py ~/Library/Application\\ Support/Talkloom/Recordings/2026-08-24_20-29-44
 
 The session's `session.json` supplies the offset between the tracks; without it
 the two files cannot be put on one timeline, since nothing in the audio says so.

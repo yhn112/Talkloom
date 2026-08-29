@@ -1,4 +1,4 @@
-# Transcriber
+# Talkloom
 
 A local meeting transcriber for macOS: a menu-bar app records the microphone and system
 audio during a call, transcribes locally with Whisper, and produces a summary. Meetings
@@ -269,7 +269,7 @@ in `project.yml` is set exactly so that they can.
 
 Two places, and the line between them is testability, not tidiness.
 
-`Packages/TranscriberCore` holds what can be verified without hardware: the WAV writer,
+`Packages/TalkloomCore` holds what can be verified without hardware: the WAV writer,
 the mach-time conversion, session and transcript models, and cloud clients behind a fakeable
 transport. Its tests need no xcodebuild, no signing and no test host, so they cost a fraction
 of an app run — anything that can live there should.
@@ -279,7 +279,7 @@ the ring buffer with it: an audio callback calls `AudioRingBuffer.write` directl
 does not inline across module boundaries by default, and the real-time path is not where a
 module boundary should be paid for.
 
-The dependency only points one way. `TranscriberCore` must not learn what a
+The dependency only points one way. `TalkloomCore` must not learn what a
 `TrackRecorder` is; the app translates at the seam (`TrackReport`).
 
 ### Tests
@@ -326,11 +326,11 @@ it is on. Do not add telemetry, analytics, or "anonymous crash reporting".
 
 The one pre-UI testing exception for credentials is the non-shipping ASR evaluator: it may
 read `.openrouter.apikey` from the repository root only after confirming that Git ignores
-the file. Transcriber.app never reads that file, and no credential may be staged or committed.
+the file. Talkloom.app never reads that file, and no credential may be staged or committed.
 
 ### Never commit
 
-`Transcriber.xcodeproj` (generated), models (`*.bin`, `*.mlmodelc`, `*.gguf`),
+`Talkloom.xcodeproj` (generated), models (`*.bin`, `*.mlmodelc`, `*.gguf`),
 recordings (`*.wav`, `*.caf`, `*.m4a`), transcripts, `build/`, `scripts/.venv/`, API keys.
 
 ## Git
